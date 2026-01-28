@@ -62,5 +62,3 @@ Notes & safety
 - `install.sh` is Debian/Ubuntu-oriented and will prompt you about DNS changes. Review DNS/resolver changes before applying them on systems using `systemd-resolved`.
 - We now generate both the project `caddy/Caddyfile` and, when present, the user `~/.config/caddy/Caddyfile` to keep local and system Caddy installs in sync.
 - The router loads `devhost.json` per request so CLI changes take effect immediately without restarting the router.
-
-If you want, I can now run a quick syntax check and a smoke test of the router in this environment, or open a PR with these changes.
