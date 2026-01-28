@@ -1,5 +1,8 @@
 # Devhost
 
+![CI](https://github.com/Patoruzuy/Devhost/actions/workflows/ci.yml/badge.svg)
+![Release](https://img.shields.io/github/v/release/Patoruzuy/Devhost)
+
 **Secure, flexible local domain routing for developers.**
 
 Devhost allows you to map subdomains of `localhost` (e.g. `myapp.localhost`) to local app ports, with automatic HTTPS and wildcard routing via Caddy and a Python backend.
@@ -19,33 +22,9 @@ Devhost allows you to map subdomains of `localhost` (e.g. `myapp.localhost`) to 
 devhost add hello 3000
 devhost list
 devhost remove hello
-
-Visit hello.localhost 
-
-in your browser!
-""",
-"install.sh": """
-#!/bin/bash
-
-# Devhost
-
-Secure, flexible local domain routing for developers.
-
-Devhost maps subdomains of localhost (for example `myapp.localhost`) to local application ports. It uses:
-
-- Caddy for TLS and wildcard proxying
-- A small FastAPI router for per-subdomain reverse-proxying
-
-Supported OS: Linux (Debian/Ubuntu tested). macOS may work with adjustments. Windows is not supported out of the box.
-
-Quickstart
-
-```bash
-./install.sh
-devhost add hello 3000
-devhost list
-devhost remove hello
 ```
+
+Visit `hello.localhost` in your browser.
 
 Run the router locally (development):
 
@@ -55,6 +34,13 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 uvicorn app:app --host 127.0.0.1 --port 5555 --reload
+```
+
+Run the router in Docker (quick):
+
+```bash
+docker compose up --build -d
+# then open http://127.0.0.1:5555 with Host header set to <name>.localhost
 ```
 
 Notes & safety

@@ -63,5 +63,11 @@ async def wildcard_proxy(request: Request, full_path: str):
     return Response(content=proxy_resp.content, status_code=proxy_resp.status_code, headers=resp_headers)
 
 
+@app.get("/health")
+async def health():
+    """Lightweight health endpoint for liveness checks."""
+    return JSONResponse({"status": "ok", "version": "v1.0.0"})
+
+
 if __name__ == "__main__":
     uvicorn.run("app:app", host="127.0.0.1", port=5555, reload=True)
