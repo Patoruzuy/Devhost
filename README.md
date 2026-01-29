@@ -15,6 +15,13 @@ Devhost allows you to map subdomains of `localhost` (e.g. `myapp.localhost`) to 
 - Wildcard reverse proxy using Python (FastAPI)
 - Supports macOS and Linux
 
+## Benefits for Devs
+
+- No need to remember localhost:PORT combos
+- Clean and memorable dev URLs
+- Auto-HTTPS with Caddy (tls internal)
+- Works with any language/framework running locally
+
 ## Quickstart
 
 ### 1. Clone the project
@@ -118,3 +125,14 @@ bash scripts/setup-macos.sh
 ```
 
 The script will prompt before making system changes and backs up any existing plist file it replaces.
+
+Non-interactive example
+
+You can run the installer non-interactively (accept all prompts and start dnsmasq if available) with:
+
+```bash
+# from repo root
+devhost install --macos --yes
+# or directly
+bash scripts/setup-macos.sh --yes
+```

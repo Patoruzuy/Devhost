@@ -9,7 +9,7 @@ RESOLVER_FILE="$RESOLVER_DIR/localhost"
 
 usage() {
   cat <<EOF
-Usage: $0 [--dry-run]
+Usage: $0 [--dry-run] [--yes]
 
 Interactive helper to install Devhost router on macOS.
 It will:
@@ -20,11 +20,19 @@ It will:
 
 Options:
   --dry-run   Print actions without making changes
+  --yes       Non-interactive: assume yes for prompts and start dnsmasq if available
 EOF
 }
 
 DRY_RUN=false
-if [ "${1:-}" = "--dry-run" ]; then DRY_RUN=true; fi
+ASSUME_YES=false
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    --yes|-y) ASSUME_YES=true ;;
+    -h|--help) usage; exit 0 ;;
+  esac
+done
 
 echo "Devhost macOS setup helper"
 echo
@@ -48,23 +56,35 @@ detect_uvicorn() {
 }
 
 echo "Default user: $USER"
-read -r -p "Enter target macOS username (press Enter to accept '$USER'): " TARGET_USER
-if [ -z "$TARGET_USER" ]; then TARGET_USER="$USER"; fi
+if $ASSUME_YES; then
+  TARGET_USER="$USER"
+else
+  read -r -p "Enter target macOS username (press Enter to accept '$USER'): " TARGET_USER
+  if [ -z "$TARGET_USER" ]; then TARGET_USER="$USER"; fi
+fi
 
 UVICORN_PATH=""
 if uvp=$(detect_uvicorn); then
   echo "Found uvicorn at: $uvp"
-  read -r -p "Use this uvicorn binary? [Y/n] " yn
-  yn=${yn:-Y}
-  if [[ "$yn" =~ ^[Yy]$ ]]; then
+  if $ASSUME_YES; then
     UVICORN_PATH="$uvp"
+  else
+    read -r -p "Use this uvicorn binary? [Y/n] " yn
+    yn=${yn:-Y}
+    if [[ "$yn" =~ ^[Yy]$ ]]; then
+      UVICORN_PATH="$uvp"
+    fi
   fi
 fi
 
 if [ -z "$UVICORN_PATH" ]; then
-  read -r -p "Enter full path to uvicorn (or leave empty to use 'python3 -m uvicorn'): " UVICORN_PATH
-  if [ -z "$UVICORN_PATH" ]; then
+  if $ASSUME_YES; then
     UVICORN_PATH="python3 -m uvicorn"
+  else
+    read -r -p "Enter full path to uvicorn (or leave empty to use 'python3 -m uvicorn'): " UVICORN_PATH
+    if [ -z "$UVICORN_PATH" ]; then
+      UVICORN_PATH="python3 -m uvicorn"
+    fi
   fi
 fi
 
@@ -74,8 +94,12 @@ echo " - Write LaunchAgent: $DEST_PLIST (from template $TEMPLATE_PLIST)"
 echo " - Ensure resolver: $RESOLVER_FILE -> nameserver 127.0.0.1"
 echo " - Optionally start dnsmasq via Homebrew and load the LaunchAgent"
 echo
-read -r -p "Proceed? [y/N] " proceed
-proceed=${proceed:-N}
+if $ASSUME_YES; then
+  proceed=Y
+else
+  read -r -p "Proceed? [y/N] " proceed
+  proceed=${proceed:-N}
+fi
 if [[ ! "$proceed" =~ ^[Yy]$ ]]; then
   echo "Aborted by user."; exit 0
 fi
@@ -108,8 +132,12 @@ fi
 echo "nameserver 127.0.0.1" | sudo tee "$RESOLVER_FILE" >/dev/null
 
 echo
-read -r -p "Start dnsmasq via Homebrew services now? [y/N] " start_dns
-start_dns=${start_dns:-N}
+if $ASSUME_YES; then
+  start_dns=Y
+else
+  read -r -p "Start dnsmasq via Homebrew services now? [y/N] " start_dns
+  start_dns=${start_dns:-N}
+fi
 if [[ "$start_dns" =~ ^[Yy]$ ]]; then
   if command -v brew >/dev/null 2>&1; then
     echo "Starting dnsmasq (brew services start dnsmasq)"
