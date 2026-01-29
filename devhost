@@ -126,10 +126,16 @@ start() {
     VENV_PYTHON=""
     if [ -x "./router/venv/bin/python" ]; then
         VENV_PYTHON="./router/venv/bin/python"
+    elif [ -x "./router/venv/Scripts/python.exe" ]; then
+        VENV_PYTHON="./router/venv/Scripts/python.exe"
     elif [ -x "./router/.venv/bin/python" ]; then
         VENV_PYTHON="./router/.venv/bin/python"
+    elif [ -x "./router/.venv/Scripts/python.exe" ]; then
+        VENV_PYTHON="./router/.venv/Scripts/python.exe"
     elif [ -x "./.venv/bin/python" ]; then
         VENV_PYTHON="./.venv/bin/python"
+    elif [ -x "./.venv/Scripts/python.exe" ]; then
+        VENV_PYTHON="./.venv/Scripts/python.exe"
     fi
 
     if [ -n "$VENV_PYTHON" ]; then
