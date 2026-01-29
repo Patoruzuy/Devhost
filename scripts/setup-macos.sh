@@ -26,10 +26,12 @@ EOF
 
 DRY_RUN=false
 ASSUME_YES=false
+START_DNS=false
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=true ;;
     --yes|-y) ASSUME_YES=true ;;
+    --start-dns) START_DNS=true ;;
     -h|--help) usage; exit 0 ;;
   esac
 done
@@ -52,6 +54,17 @@ detect_uvicorn() {
     command -v uvicorn
     return 0
   fi
+  return 1
+}
+
+# try to auto-find a venv bin path if present (prefer project .venv or router/.venv)
+auto_find_venv_bin() {
+  # prefer project root .venv then router/.venv then router/venv
+  for p in "$ROOT_DIR/.venv/bin/uvicorn" "$ROOT_DIR/router/.venv/bin/uvicorn" "$ROOT_DIR/router/venv/bin/uvicorn"; do
+    if [ -x "$p" ]; then
+      echo "$p" && return 0
+    fi
+  done
   return 1
 }
 
@@ -78,12 +91,18 @@ if uvp=$(detect_uvicorn); then
 fi
 
 if [ -z "$UVICORN_PATH" ]; then
-  if $ASSUME_YES; then
-    UVICORN_PATH="python3 -m uvicorn"
+  # try auto-find venv bin if present
+  if venvp=$(auto_find_venv_bin); then
+    UVICORN_PATH="$venvp"
+    echo "Auto-filled uvicorn from venv: $UVICORN_PATH"
   else
-    read -r -p "Enter full path to uvicorn (or leave empty to use 'python3 -m uvicorn'): " UVICORN_PATH
-    if [ -z "$UVICORN_PATH" ]; then
+    if $ASSUME_YES; then
       UVICORN_PATH="python3 -m uvicorn"
+    else
+      read -r -p "Enter full path to uvicorn (or leave empty to use 'python3 -m uvicorn'): " UVICORN_PATH
+      if [ -z "$UVICORN_PATH" ]; then
+        UVICORN_PATH="python3 -m uvicorn"
+      fi
     fi
   fi
 fi
@@ -132,7 +151,7 @@ fi
 echo "nameserver 127.0.0.1" | sudo tee "$RESOLVER_FILE" >/dev/null
 
 echo
-if $ASSUME_YES; then
+if $ASSUME_YES || $START_DNS; then
   start_dns=Y
 else
   read -r -p "Start dnsmasq via Homebrew services now? [y/N] " start_dns

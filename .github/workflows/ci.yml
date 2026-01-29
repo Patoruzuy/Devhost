@@ -38,3 +38,18 @@ jobs:
           else
             echo "ruff not installed; skipping advanced lint"
           fi
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      - name: Run ShellCheck on scripts and devhost
+        run: |
+          shellcheck -V
+          shellcheck scripts/*.sh || true
+          shellcheck devhost || true

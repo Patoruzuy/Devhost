@@ -135,4 +135,10 @@ You can run the installer non-interactively (accept all prompts and start dnsmas
 devhost install --macos --yes
 # or directly
 bash scripts/setup-macos.sh --yes
+
+If you want the script to also start dnsmasq automatically, pass `--start-dns`:
+
+```bash
+devhost install --macos --yes --start-dns
+```
 ```
