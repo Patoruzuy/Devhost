@@ -17,7 +17,10 @@ Devhost allows you to map subdomains of `localhost` (e.g. `myapp.localhost`) to 
 
 ## Quickstart
 
+### 1. Clone the project
+
 ```bash
+git clone https://github.com/YOURNAME/devhost.git
 ./install.sh
 devhost add hello 3000
 devhost list
@@ -99,3 +102,19 @@ Platform notes
 Release notes
 
 See `CHANGELOG.md` for the v1.0.0 release notes.
+
+macOS installer
+
+- An interactive installer script is available at `scripts/setup-macos.sh`. It generates a LaunchAgent plist from `router/devhost-router.plist.tmpl`, creates `/etc/resolver/localhost` pointing to `127.0.0.1`, and can optionally start `dnsmasq` via Homebrew and load the LaunchAgent.
+
+Usage examples:
+
+```bash
+# dry-run (print actions)
+bash scripts/setup-macos.sh --dry-run
+
+# run interactively (will prompt for username and uvicorn path)
+bash scripts/setup-macos.sh
+```
+
+The script will prompt before making system changes and backs up any existing plist file it replaces.
