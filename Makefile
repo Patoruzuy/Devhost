@@ -1,5 +1,9 @@
 VENV=router/venv
+ifeq ($(OS),Windows_NT)
 PY=$(VENV)/Scripts/python
+else
+PY=$(VENV)/bin/python
+endif
 
 .PHONY: venv install start test docker-up docker-build lint help
 

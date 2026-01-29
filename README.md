@@ -53,6 +53,8 @@ docker compose up --build -d
 # then open http://127.0.0.1:5555 with Host header set to <name>.localhost
 ```
 
+`docker-compose.yml` mounts the repo `devhost.json` into the container so edits take effect immediately.
+
 Notes & safety
 
 - `install.sh` is Debian/Ubuntu-oriented and will prompt you about DNS changes. Review DNS/resolver changes before applying them on systems using `systemd-resolved`.
@@ -75,6 +77,8 @@ The project uses a `devhost.json` file (project root) with a simple mapping of n
 	"api": 8000
 }
 ```
+
+The router reads `DEVHOST_CONFIG` if set; otherwise it looks for the project root `devhost.json` (even when run from `router/`).
 
 Quick test (curl)
 
@@ -135,10 +139,10 @@ You can run the installer non-interactively (accept all prompts and start dnsmas
 devhost install --macos --yes
 # or directly
 bash scripts/setup-macos.sh --yes
+```
 
 If you want the script to also start dnsmasq automatically, pass `--start-dns`:
 
 ```bash
 devhost install --macos --yes --start-dns
-```
 ```

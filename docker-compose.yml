@@ -7,5 +7,8 @@ services:
     ports:
       - "5555:5555"
     restart: unless-stopped
+    volumes:
+      - "./devhost.json:/app/devhost.json:ro"
     environment:
       - PYTHONUNBUFFERED=1
+      - DEVHOST_CONFIG=/app/devhost.json

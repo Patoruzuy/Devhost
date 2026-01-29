@@ -1,0 +1,10 @@
+*.ps1
+.devhost/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+router/venv/
+router/.venv/
+.env
