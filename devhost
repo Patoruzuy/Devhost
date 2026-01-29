@@ -122,25 +122,51 @@ start() {
         fi
     fi
 
-    # detect uvicorn binary
-    if [ -x "./.venv/bin/uvicorn" ]; then
-        UVICORN_BIN="./.venv/bin/uvicorn"
-    elif [ -x "./router/.venv/bin/uvicorn" ]; then
-        UVICORN_BIN="./router/.venv/bin/uvicorn"
-    elif [ -x "./router/venv/bin/uvicorn" ]; then
-        UVICORN_BIN="./router/venv/bin/uvicorn"
-    elif command -v uvicorn &>/dev/null; then
-        UVICORN_BIN="$(command -v uvicorn)"
-    else
-        UVICORN_BIN="python3 -m uvicorn"
+    # prefer using a python inside a venv if available
+    VENV_PYTHON=""
+    if [ -x "./router/venv/bin/python" ]; then
+        VENV_PYTHON="./router/venv/bin/python"
+    elif [ -x "./router/.venv/bin/python" ]; then
+        VENV_PYTHON="./router/.venv/bin/python"
+    elif [ -x "./.venv/bin/python" ]; then
+        VENV_PYTHON="./.venv/bin/python"
     fi
 
-    echo "Starting router using: $UVICORN_BIN"
-    # start in router directory
-    (cd router && nohup $UVICORN_BIN app:app --host 127.0.0.1 --port 5555 > "$START_LOG_FILE" 2>&1 & echo $! > "../$START_PID_FILE")
+    if [ -n "$VENV_PYTHON" ]; then
+        echo "Using venv python: $VENV_PYTHON"
+        # ensure uvicorn installed in venv
+        if ! "$VENV_PYTHON" -c "import uvicorn" >/dev/null 2>&1; then
+            if [ -f "router/requirements.txt" ]; then
+                echo "uvicorn not found in venv; installing requirements into venv"
+                "$VENV_PYTHON" -m pip install -r router/requirements.txt || true
+            fi
+        fi
+        START_CMD=("$VENV_PYTHON" -m uvicorn app:app --host 127.0.0.1 --port 5555)
+    else
+        # fallback to uvicorn binary or system python
+        if [ -x "./.venv/bin/uvicorn" ]; then
+            START_CMD=("./.venv/bin/uvicorn" "app:app" "--host" "127.0.0.1" "--port" "5555")
+        elif [ -x "./router/.venv/bin/uvicorn" ]; then
+            START_CMD=("./router/.venv/bin/uvicorn" "app:app" "--host" "127.0.0.1" "--port" "5555")
+        elif [ -x "./router/venv/bin/uvicorn" ]; then
+            START_CMD=("./router/venv/bin/uvicorn" "app:app" "--host" "127.0.0.1" "--port" "5555")
+        elif command -v uvicorn &>/dev/null; then
+            START_CMD=("$(command -v uvicorn)" "app:app" "--host" "127.0.0.1" "--port" "5555")
+        else
+            START_CMD=("python3" -m uvicorn app:app --host 127.0.0.1 --port 5555)
+        fi
+    fi
+
+    echo "Starting router with command: ${START_CMD[*]}"
+    # start in router directory but manage pidfile from repo root
+    pushd router >/dev/null 2>&1 || return 1
+    nohup "${START_CMD[@]}" > "$START_LOG_FILE" 2>&1 &
+    pid=$!
+    popd >/dev/null 2>&1 || true
+    mkdir -p "$(dirname "$START_PID_FILE")"
+    echo "$pid" > "$START_PID_FILE" || { echo "Failed to write pidfile $START_PID_FILE"; return 1; }
     sleep 1
-    if [ -f "$START_PID_FILE" ]; then
-        pid=$(cat "$START_PID_FILE")
+    if kill -0 "$pid" 2>/dev/null; then
         echo "Router started (pid $pid), logs: $START_LOG_FILE"
     else
         echo "Failed to start router; check $START_LOG_FILE"
