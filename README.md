@@ -27,7 +27,7 @@ Devhost allows you to map subdomains of `localhost` (e.g. `myapp.localhost`) to 
 ### 1. Clone the project
 
 ```bash
-git clone https://github.com/YOURNAME/devhost.git
+git clone https://github.com/Patoruzuy/devhost.git
 ./install.sh
 devhost add hello 3000
 devhost list
