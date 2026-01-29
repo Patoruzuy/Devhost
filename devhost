@@ -139,6 +139,14 @@ start() {
     fi
 
     if [ -n "$VENV_PYTHON" ]; then
+        # normalize to absolute path to avoid relative path issues when cd'ing into router
+        if command -v readlink >/dev/null 2>&1; then
+            VENV_PYTHON_ABS=$(readlink -f "$VENV_PYTHON" 2>/dev/null || true)
+        fi
+        if [ -z "${VENV_PYTHON_ABS:-}" ]; then
+            VENV_PYTHON_ABS="$(cd "$(dirname "$VENV_PYTHON")" 2>/dev/null && pwd)/$(basename "$VENV_PYTHON")"
+        fi
+        VENV_PYTHON="$VENV_PYTHON_ABS"
         echo "Using venv python: $VENV_PYTHON"
         # ensure uvicorn installed in venv
         if ! "$VENV_PYTHON" -c "import uvicorn" >/dev/null 2>&1; then
@@ -151,11 +159,11 @@ start() {
     else
         # fallback to uvicorn binary or system python
         if [ -x "./.venv/bin/uvicorn" ]; then
-            START_CMD=("./.venv/bin/uvicorn" "app:app" "--host" "127.0.0.1" "--port" "5555")
+            START_CMD=("$(cd "$(dirname "./.venv/bin/uvicorn")" && pwd)/$(basename "./.venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
         elif [ -x "./router/.venv/bin/uvicorn" ]; then
-            START_CMD=("./router/.venv/bin/uvicorn" "app:app" "--host" "127.0.0.1" "--port" "5555")
+            START_CMD=("$(cd "$(dirname "./router/.venv/bin/uvicorn")" && pwd)/$(basename "./router/.venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
         elif [ -x "./router/venv/bin/uvicorn" ]; then
-            START_CMD=("./router/venv/bin/uvicorn" "app:app" "--host" "127.0.0.1" "--port" "5555")
+            START_CMD=("$(cd "$(dirname "./router/venv/bin/uvicorn")" && pwd)/$(basename "./router/venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
         elif command -v uvicorn &>/dev/null; then
             START_CMD=("$(command -v uvicorn)" "app:app" "--host" "127.0.0.1" "--port" "5555")
         else
