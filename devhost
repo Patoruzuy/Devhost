@@ -107,8 +107,21 @@ list() {
 }
 
 case "$1" in
-  add) add $2 $3 ;;
-  remove) remove $2 ;;
-  list) list ;;
-  *) echo "Usage: devhost {add|remove|list}";;
+    add) add $2 $3 ;;
+    remove) remove $2 ;;
+    list) list ;;
+    install)
+        # support: devhost install --macos  OR devhost install macos
+        if [[ "$2" == "--macos" || "$2" == "macos" ]]; then
+            if [[ -x "scripts/setup-macos.sh" ]]; then
+                bash scripts/setup-macos.sh "${@:3}"
+            else
+                bash ./scripts/setup-macos.sh "${@:3}"
+            fi
+        else
+            echo "Usage: devhost install --macos"
+            exit 1
+        fi
+        ;;
+    *) echo "Usage: devhost {add|remove|list|install --macos}";;
 esac
