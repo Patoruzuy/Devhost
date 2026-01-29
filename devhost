@@ -106,6 +106,100 @@ list() {
     load_json | jq
 }
 
+START_PID_FILE=".devhost/router.pid"
+START_LOG_FILE="/tmp/devhost-router.log"
+
+start() {
+    # ensure router folder
+    mkdir -p .devhost
+    if [ -f "$START_PID_FILE" ]; then
+        pid=$(cat "$START_PID_FILE" 2>/dev/null || true)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo "Router already running (pid $pid)"
+            return 0
+        else
+            rm -f "$START_PID_FILE" || true
+        fi
+    fi
+
+    # detect uvicorn binary
+    if [ -x "./.venv/bin/uvicorn" ]; then
+        UVICORN_BIN="./.venv/bin/uvicorn"
+    elif [ -x "./router/.venv/bin/uvicorn" ]; then
+        UVICORN_BIN="./router/.venv/bin/uvicorn"
+    elif [ -x "./router/venv/bin/uvicorn" ]; then
+        UVICORN_BIN="./router/venv/bin/uvicorn"
+    elif command -v uvicorn &>/dev/null; then
+        UVICORN_BIN="$(command -v uvicorn)"
+    else
+        UVICORN_BIN="python3 -m uvicorn"
+    fi
+
+    echo "Starting router using: $UVICORN_BIN"
+    # start in router directory
+    (cd router && nohup $UVICORN_BIN app:app --host 127.0.0.1 --port 5555 > "$START_LOG_FILE" 2>&1 & echo $! > "../$START_PID_FILE")
+    sleep 1
+    if [ -f "$START_PID_FILE" ]; then
+        pid=$(cat "$START_PID_FILE")
+        echo "Router started (pid $pid), logs: $START_LOG_FILE"
+    else
+        echo "Failed to start router; check $START_LOG_FILE"
+        return 1
+    fi
+}
+
+stop() {
+    if [ ! -f "$START_PID_FILE" ]; then
+        echo "Router does not appear to be running (no pidfile)."
+        return 0
+    fi
+    pid=$(cat "$START_PID_FILE" 2>/dev/null || true)
+    if [ -z "$pid" ]; then
+        echo "No pid in pidfile; removing."; rm -f "$START_PID_FILE"; return 0
+    fi
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" && echo "Sent SIGTERM to $pid" || echo "Failed to kill $pid"
+        sleep 1
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" && echo "Sent SIGKILL to $pid"
+        fi
+    else
+        echo "Process $pid not running; cleaning pidfile"
+    fi
+    rm -f "$START_PID_FILE"
+}
+
+status() {
+    if [ -f "$START_PID_FILE" ]; then
+        pid=$(cat "$START_PID_FILE" 2>/dev/null || true)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo "Router running (pid $pid)"
+            # check health
+            if command -v curl &>/dev/null; then
+                if curl -sS --max-time 2 http://127.0.0.1:5555/health >/dev/null 2>&1; then
+                    echo "Health check: OK"
+                else
+                    echo "Health check: not responding"
+                fi
+            fi
+            return 0
+        else
+            echo "Stale pidfile found (pid $pid not running)"
+            return 1
+        fi
+    else
+        # fallback: try health endpoint
+        if command -v curl &>/dev/null; then
+            if curl -sS --max-time 2 http://127.0.0.1:5555/health >/dev/null 2>&1; then
+                echo "Router responding on http://127.0.0.1:5555 (no pidfile)"
+                return 0
+            fi
+        fi
+        echo "Router not running"
+        return 1
+    fi
+}
+
 case "$1" in
     add) add $2 $3 ;;
     remove) remove $2 ;;
