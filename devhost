@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 CONFIG="devhost.json"
 CADDYFILE="caddy/Caddyfile"
@@ -204,6 +204,9 @@ case "$1" in
     add) add $2 $3 ;;
     remove) remove $2 ;;
     list) list ;;
+    start) start ;;
+    stop) stop ;;
+    status) status ;;
     install)
         # support: devhost install --macos  OR devhost install macos
         if [[ "$2" == "--macos" || "$2" == "macos" ]]; then
