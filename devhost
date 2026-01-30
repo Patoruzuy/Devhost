@@ -61,23 +61,6 @@ PY
     fi
 }
 
-detect_wsl_host_ip() {
-    # Prefer Windows vEthernet (WSL) IP via PowerShell
-    if command -v powershell.exe >/dev/null 2>&1; then
-        ip=$(powershell.exe -NoProfile -Command "Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL*' -AddressFamily IPv4 | Select-Object -First 1 -ExpandProperty IPAddress" 2>/dev/null | tr -d '\r')
-        if [ -n "$ip" ]; then
-            echo "$ip"
-            return 0
-        fi
-    fi
-    # Fallback to nameserver in /etc/resolv.conf
-    ip=$(grep -m1 '^nameserver ' /etc/resolv.conf 2>/dev/null | awk '{print $2}')
-    if [ -n "$ip" ]; then
-        echo "$ip"
-        return 0
-    fi
-    return 1
-}
 
 
 normalize_target() {
@@ -134,7 +117,6 @@ Commands:
   add <name> <port|host:port>          Add a mapping
   add <name> --http <port|host:port>   Force http for dev URL
   add <name> --https <port|host:port>  Force https for dev URL
-  add <name> --wsl <port>              Map to Windows host IP when running in WSL
   remove <name>           Remove a mapping
   list                    List mappings
   url [name]              Print HTTPS URL; press Ctrl+O to open (interactive)
@@ -144,7 +126,6 @@ Commands:
   edit                    Open devhost.json in $EDITOR (fallback: vi)
   resolve <name>          Show DNS resolution and port reachability
   doctor                  Deeper diagnostics (dnsmasq/systemd-resolved/Caddy)
-  doctor --wsl [--fix-firewall]  WSL connectivity diagnostics (prints a firewall rule command)
   info                    Show this help
   start|stop|status       Manage router process
   install --macos [...]   Run macOS installer
@@ -256,49 +237,6 @@ doctor() {
     fi
 }
 
-doctor_wsl() {
-    fix_firewall=false
-    if [ "${1:-}" = "--fix-firewall" ]; then
-        fix_firewall=true
-    fi
-    echo "Devhost doctor (WSL)"
-    if ! grep -qi microsoft /proc/version 2>/dev/null; then
-        echo "WSL not detected."
-        return 1
-    fi
-    win_ip=$(detect_wsl_host_ip)
-    if [ -z "$win_ip" ]; then
-        echo "Windows host IP not found (vEthernet or resolv.conf)"
-        return 1
-    fi
-    echo "Windows host IP: $win_ip"
-    name=$(first_mapping_name)
-    if [ -n "$name" ]; then
-        target=$(get_port_for_name "$name")
-        if [ -n "$target" ]; then
-            normalized=$(normalize_target "$target" || true)
-            scheme=$(echo "$normalized" | awk '{print $1}')
-            host=$(echo "$normalized" | awk '{print $2}')
-            port=$(echo "$normalized" | awk '{print $3}')
-            echo "First mapping: ${name}.localhost -> ${scheme}://${host}:${port}"
-            if command -v curl >/dev/null 2>&1; then
-                if curl -sS --max-time 2 "http://${win_ip}:${port}/" >/dev/null 2>&1; then
-                    echo "WSL -> Windows port ${port}: OK"
-                else
-                    echo "WSL -> Windows port ${port}: connection failed"
-                    echo "Check Windows Firewall inbound rules for port ${port} (vEthernet (WSL))."
-                    if $fix_firewall; then
-                        echo
-                        echo "Run this in Windows PowerShell (Admin):"
-                        echo "New-NetFirewallRule -DisplayName \"Allow Devhost ${port} from WSL\" -Direction Inbound -Protocol TCP -LocalPort ${port} -Action Allow"
-                    fi
-                fi
-            fi
-        fi
-    else
-        echo "No mappings found to test."
-    fi
-}
 
 generate_caddyfile() {
     # generate project-local Caddyfile and a user-level Caddyfile if present
@@ -410,12 +348,10 @@ add() {
     domain=$1
     shift
     scheme=""
-    use_wsl=false
     target=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --wsl) use_wsl=true; shift ;;
             --http) scheme="http"; shift ;;
             --https) scheme="https"; shift ;;
             *) target="$1"; shift ;;
@@ -425,15 +361,6 @@ add() {
     if [ -z "$target" ]; then
         echo "Usage: devhost add <name> <port|host:port>"
         return 1
-    fi
-
-    if $use_wsl; then
-        wsl_ip=$(detect_wsl_host_ip)
-        if [ -z "$wsl_ip" ]; then
-            echo "WSL host IP not found (vEthernet or resolv.conf)"
-            return 1
-        fi
-        target="${wsl_ip}:${target}"
     fi
 
     if [ -n "$scheme" ]; then
@@ -827,17 +754,7 @@ case "$1" in
     validate) validate ;;
     edit) edit_config ;;
     resolve) resolve_mapping $2 ;;
-    doctor)
-        if [ "${2:-}" = "--wsl" ]; then
-            if [ "${3:-}" = "--fix-firewall" ]; then
-                doctor_wsl --fix-firewall
-            else
-                doctor_wsl
-            fi
-        else
-            doctor
-        fi
-        ;;
+    doctor) doctor ;;
     info|help|-h|--help) print_usage ;;
     export)
         if [[ "$2" == "caddy" ]]; then
@@ -851,15 +768,22 @@ case "$1" in
     stop) stop ;;
     status) status "$2" ;;
     install)
-        # support: devhost install --macos  OR devhost install macos
+        # support: devhost install --macos | --windows
         if [[ "$2" == "--macos" || "$2" == "macos" ]]; then
             if [[ -x "scripts/setup-macos.sh" ]]; then
                 bash scripts/setup-macos.sh "${@:3}"
             else
                 bash ./scripts/setup-macos.sh "${@:3}"
             fi
+        elif [[ "$2" == "--windows" || "$2" == "windows" ]]; then
+            if command -v powershell.exe >/dev/null 2>&1; then
+                powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$ROOT_DIR/scripts/setup-windows.ps1"
+            else
+                echo "powershell.exe not found; run scripts/setup-windows.ps1 from Windows PowerShell."
+                exit 1
+            fi
         else
-            echo "Usage: devhost install --macos"
+            echo "Usage: devhost install --macos | --windows"
             exit 1
         fi
         ;;

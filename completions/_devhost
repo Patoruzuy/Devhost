@@ -46,7 +46,7 @@ PY
       fi
       ;;
     add)
-      _arguments '1:option:(--wsl --http --https)'
+      _arguments '1:option:(--http --https)'
       ;;
     export)
       _arguments '1:subcommand:(caddy)'

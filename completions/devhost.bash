@@ -14,7 +14,7 @@ _devhost_completions() {
     # subcommand-specific
     case "$prev" in
         add)
-            COMPREPLY=( $(compgen -W "--wsl --http --https" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--http --https" -- "$cur") )
             return 0
             ;;
         remove|url|open|resolve)

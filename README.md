@@ -66,8 +66,6 @@ Quick Commands
 - `devhost add <name> <port|host:port>` — add a mapping (e.g. `devhost add hello 3000`).
 - `devhost add <name> --http <port|host:port>` — force HTTP when opening the dev URL.
 - `devhost add <name> --https <port|host:port>` — force HTTPS when opening the dev URL.
-- Flags can be combined (e.g., `devhost add hello --wsl --http 8000`).
-- `devhost add <name> --wsl <port>` — map to the Windows host IP automatically when running in WSL.
 - `devhost remove <name>` — remove a mapping.
 - `devhost list` — show active mappings.
 - `devhost url <name>` — print the HTTPS URL and press Ctrl+O to open it in the browser.
@@ -77,8 +75,6 @@ Quick Commands
 - `devhost edit` — open `devhost.json` in `$EDITOR` (fallback: `nano`/`vi`).
 - `devhost resolve <name>` — show DNS resolution and port reachability for a mapping.
 - `devhost doctor` — deeper diagnostics (dnsmasq/systemd-resolved/Caddy).
-- `devhost doctor --wsl` — WSL connectivity diagnostics to the Windows host.
-- `devhost doctor --wsl --fix-firewall` — prints a Windows PowerShell rule to allow the port.
 - `devhost info` — show all commands and usage.
 - `devhost status --json` — print router status as JSON (running, pid, health).
 
@@ -120,12 +116,11 @@ Troubleshooting
 - Router health: `curl http://127.0.0.1:5555/health` should return `{ "status": "ok" }`.
 - If DNS/resolver issues on Linux, check `systemd-resolved` and `/etc/resolv.conf` for unintended changes.
 - Ensure Caddy is running if you depend on system TLS (check `systemctl status caddy`).
-- WSL/Windows: if your app runs on Windows but Devhost runs in WSL, use `devhost add <name> <windows-host-ip>:<port>` (the Windows host IP is often the `nameserver` in `/etc/resolv.conf`).
-- WSL/Windows shortcut: `devhost add <name> --wsl <port>` will auto-use the Windows vEthernet (WSL) IP if available, falling back to `/etc/resolv.conf`.
 
 Platform notes
 
 - `install.sh` targets Debian/Ubuntu systems; Windows is not supported by the install script — run the router in Docker on Windows.
+- Windows setup is supported via `scripts/setup-windows.ps1` (see below).
 
 Release notes
 
@@ -164,4 +159,20 @@ If you want the script to also start dnsmasq automatically, pass `--start-dns`:
 
 ```bash
 devhost install --macos --yes --start-dns
+```
+
+Windows installer
+
+Run the PowerShell setup script from Windows to prepare the venv, router deps, and initial config:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\setup-windows.ps1
+```
+
+The Windows installer prints next-step instructions for installing Caddy and running the router.
+You can run the CLI from Windows PowerShell using the shim:
+
+```powershell
+.\devhost.ps1 add hello 8000
 ```
