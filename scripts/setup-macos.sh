@@ -96,15 +96,41 @@ if [ -z "$UVICORN_PATH" ]; then
     UVICORN_PATH="$venvp"
     echo "Auto-filled uvicorn from venv: $UVICORN_PATH"
   else
-    if $ASSUME_YES; then
-      UVICORN_PATH="python3 -m uvicorn"
-    else
+  if $ASSUME_YES; then
+    UVICORN_PATH="python3 -m uvicorn"
+  else
       read -r -p "Enter full path to uvicorn (or leave empty to use 'python3 -m uvicorn'): " UVICORN_PATH
       if [ -z "$UVICORN_PATH" ]; then
         UVICORN_PATH="python3 -m uvicorn"
       fi
     fi
   fi
+fi
+
+# Normalize uvicorn command for LaunchAgent
+UVICORN_BIN=""
+UVICORN_ARGS=""
+if [[ "$UVICORN_PATH" =~ \  ]]; then
+  # Allow only "python3 -m uvicorn" form
+  if [[ "$UVICORN_PATH" =~ ^python3[[:space:]]+-m[[:space:]]+uvicorn$ ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+      UVICORN_BIN="$(command -v python3)"
+      UVICORN_ARGS="    <string>-m</string>\n    <string>uvicorn</string>"
+    else
+      echo "python3 not found; please provide a full path to uvicorn." >&2
+      exit 1
+    fi
+  else
+    echo "Unsupported uvicorn command '$UVICORN_PATH'. Provide a uvicorn binary path or 'python3 -m uvicorn'." >&2
+    exit 1
+  fi
+else
+  UVICORN_BIN="$UVICORN_PATH"
+fi
+
+if [ -n "$UVICORN_BIN" ] && [ ! -x "$UVICORN_BIN" ]; then
+  echo "uvicorn binary not executable: $UVICORN_BIN" >&2
+  exit 1
 fi
 
 echo
@@ -125,7 +151,13 @@ fi
 
 generate_plist() {
   tmpfile=$(mktemp)
-  sed "s|{{USER}}|$TARGET_USER|g; s|{{VENV_BIN}}|$UVICORN_PATH|g" "$TEMPLATE_PLIST" > "$tmpfile"
+  # Replace placeholders for user and uvicorn command/args.
+  sed "s|{{USER}}|$TARGET_USER|g; s|{{UVICORN_BIN}}|$UVICORN_BIN|g" "$TEMPLATE_PLIST" > "$tmpfile"
+  if [ -n "$UVICORN_ARGS" ]; then
+    perl -0777 -i -pe "s|\\{\\{UVICORN_ARGS\\}\\}|$UVICORN_ARGS|g" "$tmpfile"
+  else
+    perl -0777 -i -pe "s|\\{\\{UVICORN_ARGS\\}\\}\\n||g" "$tmpfile"
+  fi
   echo "$tmpfile"
 }
 

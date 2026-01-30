@@ -7,8 +7,9 @@
 
   <key>ProgramArguments</key>
   <array>
-    <!-- Point this to the venv uvicorn binary or to system uvicorn. Replace {{VENV_BIN}} accordingly. -->
-    <string>{{VENV_BIN}}</string>
+    <!-- Point this to the venv uvicorn binary or use python3 -m uvicorn (handled by setup script). -->
+    <string>{{UVICORN_BIN}}</string>
+    {{UVICORN_ARGS}}
     <string>app:app</string>
     <string>--host</string>
     <string>127.0.0.1</string>
