@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 import uvicorn
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 
 app = FastAPI()
 
@@ -58,6 +58,27 @@ def load_routes() -> Dict[str, int]:
     return {}
 
 
+def parse_target(value) -> Optional[Tuple[str, int]]:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        if value > 0:
+            return ("127.0.0.1", value)
+        return None
+    if isinstance(value, str):
+        if ":" in value:
+            host, port = value.rsplit(":", 1)
+            if host and port.isdigit():
+                return (host, int(port))
+            return None
+        if value.isdigit():
+            port = int(value)
+            if port > 0:
+                return ("127.0.0.1", port)
+            return None
+    return None
+
+
 @app.get("/health")
 async def health():
     """Lightweight health endpoint for liveness checks."""
@@ -74,12 +95,14 @@ async def wildcard_proxy(request: Request, full_path: str):
     if not subdomain:
         return JSONResponse({"error": "Missing or invalid Host header"}, status_code=400)
 
-    target_port = routes.get(subdomain)
-    if not target_port:
+    target_value = routes.get(subdomain)
+    target = parse_target(target_value)
+    if not target:
         return JSONResponse({"error": f"No route found for {subdomain}.localhost"}, status_code=404)
+    target_host, target_port = target
 
     # build upstream URL and preserve query string
-    url = f"http://127.0.0.1:{target_port}{request.url.path}"
+    url = f"http://{target_host}:{target_port}{request.url.path}"
     if request.url.query:
         url = url + "?" + request.url.query
 

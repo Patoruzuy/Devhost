@@ -22,7 +22,29 @@ _devhost() {
 
   _describe -t commands 'devhost commands' commands
 
+  # dynamic names from devhost.json (best-effort)
+  local -a names
+  if command -v jq >/dev/null 2>&1; then
+    names=(${(f)"$(jq -r 'keys[]' devhost.json 2>/dev/null)"})
+  elif command -v python3 >/dev/null 2>&1; then
+    names=(${(f)"$(python3 - <<'PY' 2>/dev/null
+import json
+try:
+    data=json.load(open("devhost.json"))
+    print("\n".join(sorted(data.keys())))
+except Exception:
+    pass
+PY
+)"})
+  fi
+
   case $words[2] in
+    remove|url|open|resolve)
+      if (( ${#names[@]} )); then
+        _arguments '1:name:->names' && return 0
+        _values 'names' $names
+      fi
+      ;;
     export)
       _arguments '1:subcommand:(caddy)'
       ;;

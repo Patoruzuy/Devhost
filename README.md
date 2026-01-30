@@ -63,7 +63,7 @@ Notes & safety
 
 Quick Commands
 
-- `devhost add <name> <port>` — add a mapping (e.g. `devhost add hello 3000`).
+- `devhost add <name> <port|host:port>` — add a mapping (e.g. `devhost add hello 3000`).
 - `devhost remove <name>` — remove a mapping.
 - `devhost list` — show active mappings.
 - `devhost url <name>` — print the HTTPS URL and press Ctrl+O to open it in the browser.
@@ -114,6 +114,7 @@ Troubleshooting
 - Router health: `curl http://127.0.0.1:5555/health` should return `{ "status": "ok" }`.
 - If DNS/resolver issues on Linux, check `systemd-resolved` and `/etc/resolv.conf` for unintended changes.
 - Ensure Caddy is running if you depend on system TLS (check `systemctl status caddy`).
+- WSL/Windows: if your app runs on Windows but Devhost runs in WSL, use `devhost add <name> <windows-host-ip>:<port>` (the Windows host IP is often the `nameserver` in `/etc/resolv.conf`).
 
 Platform notes
 
