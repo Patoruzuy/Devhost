@@ -77,6 +77,7 @@ Quick Commands
 - `devhost edit` — open `devhost.json` in `$EDITOR` (fallback: `nano`/`vi`).
 - `devhost resolve <name>` — show DNS resolution and port reachability for a mapping.
 - `devhost doctor` — deeper diagnostics (dnsmasq/systemd-resolved/Caddy).
+- `devhost doctor --wsl` — WSL connectivity diagnostics to the Windows host.
 - `devhost info` — show all commands and usage.
 - `devhost status --json` — print router status as JSON (running, pid, health).
 
