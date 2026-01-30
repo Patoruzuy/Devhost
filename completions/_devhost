@@ -45,6 +45,9 @@ PY
         _values 'names' $names
       fi
       ;;
+    add)
+      _arguments '1:option:(--wsl)'
+      ;;
     export)
       _arguments '1:subcommand:(caddy)'
       ;;

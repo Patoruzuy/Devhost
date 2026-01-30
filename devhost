@@ -105,6 +105,7 @@ Usage: devhost <command> [args]
 
 Commands:
   add <name> <port|host:port>  Add a mapping
+  add <name> --wsl <port>      Map to Windows host IP when running in WSL
   remove <name>           Remove a mapping
   list                    List mappings
   url [name]              Print HTTPS URL; press Ctrl+O to open (interactive)
@@ -312,6 +313,15 @@ PY
 add() {
     domain=$1
     port=$2
+    if [ "$port" = "--wsl" ]; then
+        port=$3
+        wsl_ns=$(grep -m1 '^nameserver ' /etc/resolv.conf 2>/dev/null | awk '{print $2}')
+        if [ -z "$wsl_ns" ]; then
+            echo "WSL host IP not found in /etc/resolv.conf"
+            return 1
+        fi
+        port="${wsl_ns}:${port}"
+    fi
     json=$(load_json)
     if [[ "$port" == *":"* ]]; then
         host_part="${port%:*}"

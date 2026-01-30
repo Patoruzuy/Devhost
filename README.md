@@ -64,6 +64,7 @@ Notes & safety
 Quick Commands
 
 - `devhost add <name> <port|host:port>` — add a mapping (e.g. `devhost add hello 3000`).
+- `devhost add <name> --wsl <port>` — map to the Windows host IP automatically when running in WSL.
 - `devhost remove <name>` — remove a mapping.
 - `devhost list` — show active mappings.
 - `devhost url <name>` — print the HTTPS URL and press Ctrl+O to open it in the browser.
@@ -115,6 +116,7 @@ Troubleshooting
 - If DNS/resolver issues on Linux, check `systemd-resolved` and `/etc/resolv.conf` for unintended changes.
 - Ensure Caddy is running if you depend on system TLS (check `systemctl status caddy`).
 - WSL/Windows: if your app runs on Windows but Devhost runs in WSL, use `devhost add <name> <windows-host-ip>:<port>` (the Windows host IP is often the `nameserver` in `/etc/resolv.conf`).
+- WSL/Windows shortcut: `devhost add <name> --wsl <port>` will auto-use the nameserver IP from `/etc/resolv.conf`.
 
 Platform notes
 

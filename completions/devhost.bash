@@ -13,6 +13,10 @@ _devhost_completions() {
 
     # subcommand-specific
     case "$prev" in
+        add)
+            COMPREPLY=( $(compgen -W "--wsl" -- "$cur") )
+            return 0
+            ;;
         remove|url|open|resolve)
             if command -v jq >/dev/null 2>&1; then
                 names=$(jq -r 'keys[]' devhost.json 2>/dev/null)
