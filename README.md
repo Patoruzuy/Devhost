@@ -66,6 +66,10 @@ Quick Commands
 - `devhost add <name> <port>` — add a mapping (e.g. `devhost add hello 3000`).
 - `devhost remove <name>` — remove a mapping.
 - `devhost list` — show active mappings.
+- `devhost url <name>` — print the HTTPS URL and press Ctrl+O to open it in the browser.
+- `devhost open <name>` — open the HTTPS URL in the default browser.
+- `devhost validate` — quick health checks (config JSON, router health, DNS).
+- `devhost export caddy` — print the generated Caddyfile to stdout.
 
 Configuration
 
@@ -117,6 +121,7 @@ See `CHANGELOG.md` for the v1.0.0 release notes.
 macOS installer
 
 - An interactive installer script is available at `scripts/setup-macos.sh`. It generates a LaunchAgent plist from `router/devhost-router.plist.tmpl`, creates `/etc/resolver/localhost` pointing to `127.0.0.1`, and can optionally start `dnsmasq` via Homebrew and load the LaunchAgent.
+- The installer accepts either a uvicorn binary path or `python3 -m uvicorn` and generates a valid LaunchAgent accordingly.
 
 Usage examples:
 

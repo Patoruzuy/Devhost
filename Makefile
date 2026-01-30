@@ -5,7 +5,7 @@ else
 PY=$(VENV)/bin/python
 endif
 
-.PHONY: venv install start test docker-up docker-build lint help
+.PHONY: venv install start test docker-up docker-build lint help devhost-url devhost-open devhost-validate devhost-export-caddy
 
 venv:
 	python -m venv $(VENV)
@@ -19,6 +19,7 @@ start: install
 
 test: install
 	$(PY) -m py_compile router/*.py
+	$(PY) -m unittest discover -s tests -p "test_*.py"
 
 docker-build:
 	docker compose build
@@ -29,5 +30,17 @@ docker-up:
 lint: install
 	-$(PY) -m ruff check .
 
+devhost-url:
+	./devhost url
+
+devhost-open:
+	./devhost open
+
+devhost-validate:
+	./devhost validate
+
+devhost-export-caddy:
+	./devhost export caddy
+
 help:
-	@echo "Available targets: venv install start test docker-build docker-up lint"
+	@echo "Available targets: venv install start test docker-build docker-up lint devhost-url devhost-open devhost-validate devhost-export-caddy"
