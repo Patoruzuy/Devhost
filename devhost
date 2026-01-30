@@ -247,9 +247,9 @@ doctor_wsl() {
         echo "WSL not detected."
         return 1
     fi
-    win_ip=$(grep -m1 '^nameserver ' /etc/resolv.conf 2>/dev/null | awk '{print $2}')
+    win_ip=$(detect_wsl_host_ip)
     if [ -z "$win_ip" ]; then
-        echo "Windows host IP not found in /etc/resolv.conf"
+        echo "Windows host IP not found (vEthernet or resolv.conf)"
         return 1
     fi
     echo "Windows host IP: $win_ip"
@@ -409,12 +409,12 @@ add() {
     fi
 
     if $use_wsl; then
-        wsl_ns=$(grep -m1 '^nameserver ' /etc/resolv.conf 2>/dev/null | awk '{print $2}')
-        if [ -z "$wsl_ns" ]; then
-            echo "WSL host IP not found in /etc/resolv.conf"
+        wsl_ip=$(detect_wsl_host_ip)
+        if [ -z "$wsl_ip" ]; then
+            echo "WSL host IP not found (vEthernet or resolv.conf)"
             return 1
         fi
-        target="${wsl_ns}:${target}"
+        target="${wsl_ip}:${target}"
     fi
 
     if [ -n "$scheme" ]; then
@@ -846,3 +846,20 @@ case "$1" in
         ;;
     *) print_usage;;
 esac
+detect_wsl_host_ip() {
+    # Prefer Windows vEthernet (WSL) IP via PowerShell
+    if command -v powershell.exe >/dev/null 2>&1; then
+        ip=$(powershell.exe -NoProfile -Command "Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL*' -AddressFamily IPv4 | Select-Object -First 1 -ExpandProperty IPAddress" 2>/dev/null | tr -d '\r')
+        if [ -n "$ip" ]; then
+            echo "$ip"
+            return 0
+        fi
+    fi
+    # Fallback to nameserver in /etc/resolv.conf
+    ip=$(grep -m1 '^nameserver ' /etc/resolv.conf 2>/dev/null | awk '{print $2}')
+    if [ -n "$ip" ]; then
+        echo "$ip"
+        return 0
+    fi
+    return 1
+}

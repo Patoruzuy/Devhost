@@ -121,7 +121,7 @@ Troubleshooting
 - If DNS/resolver issues on Linux, check `systemd-resolved` and `/etc/resolv.conf` for unintended changes.
 - Ensure Caddy is running if you depend on system TLS (check `systemctl status caddy`).
 - WSL/Windows: if your app runs on Windows but Devhost runs in WSL, use `devhost add <name> <windows-host-ip>:<port>` (the Windows host IP is often the `nameserver` in `/etc/resolv.conf`).
-- WSL/Windows shortcut: `devhost add <name> --wsl <port>` will auto-use the nameserver IP from `/etc/resolv.conf`.
+- WSL/Windows shortcut: `devhost add <name> --wsl <port>` will auto-use the Windows vEthernet (WSL) IP if available, falling back to `/etc/resolv.conf`.
 
 Platform notes
 
