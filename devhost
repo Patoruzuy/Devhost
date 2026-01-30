@@ -288,7 +288,7 @@ print_caddyfile() {
         if [[ $mapcount -gt 0 ]]; then
             echo ""
             echo "# Direct mappings"
-            echo "$json" | jq -r 'to_entries[] | "\(.key).localhost {\n    reverse_proxy localhost:\(.value)\n    tls internal\n}\n"'
+            echo "$json" | jq -r 'to_entries[] | "\(.key).localhost {\n    reverse_proxy \(.value | tostring | if test(\":\") then . else \"localhost:\" + . end)\n    tls internal\n}\n"'
         fi
     else
         if [ -z "$PYTHON_BIN" ]; then
@@ -700,4 +700,3 @@ case "$1" in
         ;;
     *) print_usage;;
 esac
-  status [--json]         Router status (JSON output with --json)
