@@ -545,6 +545,35 @@ stop() {
 }
 
 status() {
+    if [ "${1:-}" = "--json" ]; then
+        running=false
+        pid=""
+        health="unknown"
+        if [ -f "$START_PID_FILE" ]; then
+            pid=$(cat "$START_PID_FILE" 2>/dev/null || true)
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                running=true
+            fi
+        else
+            if command -v curl &>/dev/null; then
+                if curl -sS --max-time 2 http://127.0.0.1:5555/health >/dev/null 2>&1; then
+                    running=true
+                fi
+            fi
+        fi
+        if command -v curl &>/dev/null; then
+            if curl -sS --max-time 2 http://127.0.0.1:5555/health >/dev/null 2>&1; then
+                health="ok"
+            else
+                health="not_responding"
+            fi
+        fi
+        printf '{"running":%s,"pid":%s,"health":"%s"}\n' \
+            "$running" \
+            "$( [ -n "$pid" ] && echo "$pid" || echo null )" \
+            "$health"
+        return 0
+    fi
     if [ -f "$START_PID_FILE" ]; then
         pid=$(cat "$START_PID_FILE" 2>/dev/null || true)
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
@@ -596,7 +625,7 @@ case "$1" in
         ;;
     start) start ;;
     stop) stop ;;
-    status) status ;;
+    status) status "$2" ;;
     install)
         # support: devhost install --macos  OR devhost install macos
         if [[ "$2" == "--macos" || "$2" == "macos" ]]; then

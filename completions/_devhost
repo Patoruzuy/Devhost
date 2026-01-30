@@ -1,0 +1,35 @@
+#compdef devhost
+
+_devhost() {
+  local -a commands
+  commands=(
+    "add:Add a mapping"
+    "remove:Remove a mapping"
+    "list:List mappings"
+    "url:Print HTTPS URL (Ctrl+O to open)"
+    "open:Open HTTPS URL"
+    "validate:Quick health checks"
+    "export:Print generated Caddyfile"
+    "edit:Open devhost.json in editor"
+    "resolve:Show DNS and port reachability"
+    "doctor:Deeper diagnostics"
+    "info:Show help"
+    "start:Start router"
+    "stop:Stop router"
+    "status:Router status"
+    "install:Run macOS installer"
+  )
+
+  _describe -t commands 'devhost commands' commands
+
+  case $words[2] in
+    export)
+      _arguments '1:subcommand:(caddy)'
+      ;;
+    status)
+      _arguments '*:option:(--json)'
+      ;;
+  esac
+}
+
+_devhost "$@"

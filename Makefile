@@ -5,7 +5,7 @@ else
 PY=$(VENV)/bin/python
 endif
 
-.PHONY: venv install start test docker-up docker-build lint help devhost-url devhost-open devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info
+.PHONY: venv install start test docker-up docker-build lint help devhost-url devhost-open devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info devhost-status-json completions-zsh completions-bash
 
 venv:
 	python -m venv $(VENV)
@@ -54,5 +54,18 @@ devhost-doctor:
 devhost-info:
 	./devhost info
 
+devhost-status-json:
+	./devhost status --json
+
+completions-zsh:
+	mkdir -p $(HOME)/.zsh/completions
+	cp completions/_devhost $(HOME)/.zsh/completions/_devhost
+	@echo "Add to .zshrc if needed: fpath=($(HOME)/.zsh/completions $$fpath) && autoload -U compinit && compinit"
+
+completions-bash:
+	mkdir -p $(HOME)/.bash_completion.d
+	cp completions/devhost.bash $(HOME)/.bash_completion.d/devhost
+	@echo "Add to .bashrc if needed: source $(HOME)/.bash_completion.d/devhost"
+
 help:
-	@echo "Available targets: venv install start test docker-build docker-up lint devhost-url devhost-open devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info"
+	@echo "Available targets: venv install start test docker-build docker-up lint devhost-url devhost-open devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info devhost-status-json completions-zsh completions-bash"

@@ -74,6 +74,7 @@ Quick Commands
 - `devhost resolve <name>` — show DNS resolution and port reachability for a mapping.
 - `devhost doctor` — deeper diagnostics (dnsmasq/systemd-resolved/Caddy).
 - `devhost info` — show all commands and usage.
+- `devhost status --json` — print router status as JSON (running, pid, health).
 
 Configuration
 
@@ -126,6 +127,7 @@ macOS installer
 
 - An interactive installer script is available at `scripts/setup-macos.sh`. It generates a LaunchAgent plist from `router/devhost-router.plist.tmpl`, creates `/etc/resolver/localhost` pointing to `127.0.0.1`, and can optionally start `dnsmasq` via Homebrew and load the LaunchAgent.
 - The installer accepts either a uvicorn binary path or `python3 -m uvicorn` and generates a valid LaunchAgent accordingly.
+- The installer can optionally install shell completions to `~/.zsh/completions` and `~/.bash_completion.d`.
 
 Usage examples:
 

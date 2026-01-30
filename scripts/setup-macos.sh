@@ -9,7 +9,7 @@ RESOLVER_FILE="$RESOLVER_DIR/localhost"
 
 usage() {
   cat <<EOF
-Usage: $0 [--dry-run] [--yes]
+Usage: $0 [--dry-run] [--yes] [--install-completions]
 
 Interactive helper to install Devhost router on macOS.
 It will:
@@ -17,21 +17,25 @@ It will:
  - generate a LaunchAgent plist from router/devhost-router.plist.tmpl
  - write a resolver file at /etc/resolver/localhost pointing to 127.0.0.1
  - optionally start dnsmasq via Homebrew services and load the LaunchAgent
+ - optionally install shell completions (zsh/bass where supported)
 
 Options:
   --dry-run   Print actions without making changes
   --yes       Non-interactive: assume yes for prompts and start dnsmasq if available
+  --install-completions  Install shell completions into ~/.zsh/completions and ~/.bash_completion.d
 EOF
 }
 
 DRY_RUN=false
 ASSUME_YES=false
 START_DNS=false
+INSTALL_COMPLETIONS=false
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=true ;;
     --yes|-y) ASSUME_YES=true ;;
     --start-dns) START_DNS=true ;;
+    --install-completions) INSTALL_COMPLETIONS=true ;;
     -h|--help) usage; exit 0 ;;
   esac
 done
@@ -138,6 +142,7 @@ echo "Summary of actions to perform:"
 echo " - Write LaunchAgent: $DEST_PLIST (from template $TEMPLATE_PLIST)"
 echo " - Ensure resolver: $RESOLVER_FILE -> nameserver 127.0.0.1"
 echo " - Optionally start dnsmasq via Homebrew and load the LaunchAgent"
+echo " - Optionally install shell completions"
 echo
 if $ASSUME_YES; then
   proceed=Y
@@ -195,6 +200,37 @@ if [[ "$start_dns" =~ ^[Yy]$ ]]; then
     brew services start dnsmasq || sudo brew services start dnsmasq || true
   else
     echo "brew not found; please install dnsmasq with Homebrew: brew install dnsmasq" >&2
+  fi
+fi
+
+echo
+if $ASSUME_YES || $INSTALL_COMPLETIONS; then
+  install_comp=Y
+else
+  read -r -p "Install shell completions? [y/N] " install_comp
+  install_comp=${install_comp:-N}
+fi
+if [[ "$install_comp" =~ ^[Yy]$ ]]; then
+  # zsh completions
+  ZSH_COMP_DIR="$HOME/.zsh/completions"
+  mkdir -p "$ZSH_COMP_DIR"
+  if [ -f "$ROOT_DIR/completions/_devhost" ]; then
+    cp -v "$ROOT_DIR/completions/_devhost" "$ZSH_COMP_DIR/_devhost"
+    echo "Installed zsh completion to $ZSH_COMP_DIR/_devhost"
+    echo "If completions don't work, ensure your .zshrc includes: fpath=($ZSH_COMP_DIR $fpath) and run 'autoload -U compinit; compinit'"
+  else
+    echo "zsh completion source not found at $ROOT_DIR/completions/_devhost"
+  fi
+
+  # bash completions (best-effort)
+  BASH_COMP_DIR="$HOME/.bash_completion.d"
+  mkdir -p "$BASH_COMP_DIR"
+  if [ -f "$ROOT_DIR/completions/devhost.bash" ]; then
+    cp -v "$ROOT_DIR/completions/devhost.bash" "$BASH_COMP_DIR/devhost"
+    echo "Installed bash completion to $BASH_COMP_DIR/devhost"
+    echo "If completions don't work, add this to your .bashrc: source $BASH_COMP_DIR/devhost"
+  else
+    echo "bash completion source not found at $ROOT_DIR/completions/devhost.bash"
   fi
 fi
 
