@@ -125,6 +125,7 @@ Commands:
   edit                    Open devhost.json in $EDITOR (fallback: vi)
   resolve <name>          Show DNS resolution and port reachability
   doctor                  Deeper diagnostics (dnsmasq/systemd-resolved/Caddy)
+  doctor --wsl [--fix-firewall]  WSL connectivity diagnostics (prints a firewall rule command)
   info                    Show this help
   start|stop|status       Manage router process
   install --macos [...]   Run macOS installer
@@ -237,6 +238,10 @@ doctor() {
 }
 
 doctor_wsl() {
+    fix_firewall=false
+    if [ "${1:-}" = "--fix-firewall" ]; then
+        fix_firewall=true
+    fi
     echo "Devhost doctor (WSL)"
     if ! grep -qi microsoft /proc/version 2>/dev/null; then
         echo "WSL not detected."
@@ -263,6 +268,11 @@ doctor_wsl() {
                 else
                     echo "WSL -> Windows port ${port}: connection failed"
                     echo "Check Windows Firewall inbound rules for port ${port} (vEthernet (WSL))."
+                    if $fix_firewall; then
+                        echo
+                        echo "Run this in Windows PowerShell (Admin):"
+                        echo "New-NetFirewallRule -DisplayName \"Allow Devhost ${port} from WSL\" -Direction Inbound -Protocol TCP -LocalPort ${port} -Action Allow"
+                    fi
                 fi
             fi
         fi
@@ -800,7 +810,11 @@ case "$1" in
     resolve) resolve_mapping $2 ;;
     doctor)
         if [ "${2:-}" = "--wsl" ]; then
-            doctor_wsl
+            if [ "${3:-}" = "--fix-firewall" ]; then
+                doctor_wsl --fix-firewall
+            else
+                doctor_wsl
+            fi
         else
             doctor
         fi
