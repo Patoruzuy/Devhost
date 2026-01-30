@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-CONFIG="devhost.json"
-CADDYFILE="caddy/Caddyfile"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG="$ROOT_DIR/devhost.json"
+CADDYFILE="$ROOT_DIR/caddy/Caddyfile"
 PYTHON_BIN=""
 if command -v python3 &> /dev/null; then
     PYTHON_BIN="python3"
@@ -10,26 +11,8 @@ elif command -v python &> /dev/null; then
 fi
 
 load_json() {
-    if [[ ! -f $CONFIG ]]; then
-        echo "{}" > $CONFIG
-    fi
-    if command -v jq &> /dev/null; then
-        if ! jq empty "$CONFIG" >/dev/null 2>&1; then
-            echo "{}" > "$CONFIG"
-        fi
-    else
-        if [ -n "$PYTHON_BIN" ]; then
-            if ! "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
-import json,sys
-try:
-    json.load(open("devhost.json"))
-except Exception:
-    sys.exit(1)
-PY
-            then
-                echo "{}" > "$CONFIG"
-            fi
-        fi
+    if [[ ! -f "$CONFIG" ]]; then
+        echo "{}" > "$CONFIG"
     fi
     cat "$CONFIG"
 }
@@ -61,10 +44,10 @@ generate_caddyfile() {
             echo "python3 (or python) is required to render mappings without jq."
             return 1
         fi
-        "$PYTHON_BIN" - <<PY >> "$CADDYFILE"
+        "$PYTHON_BIN" - "$CONFIG" <<PY >> "$CADDYFILE"
 import json,sys
 try:
-    data=json.load(open('devhost.json'))
+    data=json.load(open(sys.argv[1]))
 except Exception:
     data={}
 for k,v in data.items():
@@ -102,13 +85,13 @@ add() {
             echo "python3 (or python) is required to add mappings without jq."
             return 1
         fi
-        new_json=$("$PYTHON_BIN" - "$domain" "$port" <<PY
+        new_json=$("$PYTHON_BIN" - "$CONFIG" "$domain" "$port" <<PY
 import json,sys
 try:
-    data=json.load(open('devhost.json'))
+    data=json.load(open(sys.argv[1]))
 except Exception:
     data={}
-data[sys.argv[1]] = int(sys.argv[2])
+data[sys.argv[2]] = int(sys.argv[3])
 print(json.dumps(data))
 PY
 )
@@ -128,13 +111,13 @@ remove() {
             echo "python3 (or python) is required to remove mappings without jq."
             return 1
         fi
-        new_json=$("$PYTHON_BIN" - "$domain" <<PY
+        new_json=$("$PYTHON_BIN" - "$CONFIG" "$domain" <<PY
 import json,sys
 try:
-    data=json.load(open('devhost.json'))
+    data=json.load(open(sys.argv[1]))
 except Exception:
     data={}
-data.pop(sys.argv[1], None)
+data.pop(sys.argv[2], None)
 print(json.dumps(data))
 PY
 )
@@ -145,18 +128,17 @@ PY
 }
 
 list() {
-    json=$(load_json)
     if command -v jq &> /dev/null; then
-        echo "$json" | jq
+        load_json | jq
     else
         if [ -z "$PYTHON_BIN" ]; then
-            echo "$json"
+            load_json
             return 0
         fi
-        echo "$json" | "$PYTHON_BIN" - <<PY
+        "$PYTHON_BIN" - "$CONFIG" <<PY
 import json,sys
 try:
-    data=json.load(sys.stdin)
+    data=json.load(open(sys.argv[1]))
 except Exception:
     data={}
 print(json.dumps(data, indent=2, sort_keys=True))
@@ -164,12 +146,12 @@ PY
     fi
 }
 
-START_PID_FILE=".devhost/router.pid"
+START_PID_FILE="$ROOT_DIR/.devhost/router.pid"
 START_LOG_FILE="/tmp/devhost-router.log"
 
 start() {
     # ensure router folder
-    mkdir -p .devhost
+    mkdir -p "$(dirname "$START_PID_FILE")"
     if [ -f "$START_PID_FILE" ]; then
         pid=$(cat "$START_PID_FILE" 2>/dev/null || true)
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
@@ -182,18 +164,18 @@ start() {
 
     # prefer using a python inside a venv if available
     VENV_PYTHON=""
-    if [ -x "./router/venv/bin/python" ]; then
-        VENV_PYTHON="./router/venv/bin/python"
-    elif [ -x "./router/venv/Scripts/python.exe" ]; then
-        VENV_PYTHON="./router/venv/Scripts/python.exe"
-    elif [ -x "./router/.venv/bin/python" ]; then
-        VENV_PYTHON="./router/.venv/bin/python"
-    elif [ -x "./router/.venv/Scripts/python.exe" ]; then
-        VENV_PYTHON="./router/.venv/Scripts/python.exe"
-    elif [ -x "./.venv/bin/python" ]; then
-        VENV_PYTHON="./.venv/bin/python"
-    elif [ -x "./.venv/Scripts/python.exe" ]; then
-        VENV_PYTHON="./.venv/Scripts/python.exe"
+    if [ -x "$ROOT_DIR/router/venv/bin/python" ]; then
+        VENV_PYTHON="$ROOT_DIR/router/venv/bin/python"
+    elif [ -x "$ROOT_DIR/router/venv/Scripts/python.exe" ]; then
+        VENV_PYTHON="$ROOT_DIR/router/venv/Scripts/python.exe"
+    elif [ -x "$ROOT_DIR/router/.venv/bin/python" ]; then
+        VENV_PYTHON="$ROOT_DIR/router/.venv/bin/python"
+    elif [ -x "$ROOT_DIR/router/.venv/Scripts/python.exe" ]; then
+        VENV_PYTHON="$ROOT_DIR/router/.venv/Scripts/python.exe"
+    elif [ -x "$ROOT_DIR/.venv/bin/python" ]; then
+        VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
+    elif [ -x "$ROOT_DIR/.venv/Scripts/python.exe" ]; then
+        VENV_PYTHON="$ROOT_DIR/.venv/Scripts/python.exe"
     fi
 
     if [ -n "$VENV_PYTHON" ]; then
@@ -208,20 +190,20 @@ start() {
         echo "Using venv python: $VENV_PYTHON"
         # ensure uvicorn installed in venv
         if ! "$VENV_PYTHON" -c "import uvicorn" >/dev/null 2>&1; then
-            if [ -f "router/requirements.txt" ]; then
-                echo "uvicorn not found in venv; installing requirements into venv"
-                "$VENV_PYTHON" -m pip install -r router/requirements.txt || true
-            fi
+        if [ -f "$ROOT_DIR/router/requirements.txt" ]; then
+            echo "uvicorn not found in venv; installing requirements into venv"
+            "$VENV_PYTHON" -m pip install -r "$ROOT_DIR/router/requirements.txt" || true
+        fi
         fi
         START_CMD=("$VENV_PYTHON" -m uvicorn app:app --host 127.0.0.1 --port 5555)
     else
         # fallback to uvicorn binary or system python
-        if [ -x "./.venv/bin/uvicorn" ]; then
-            START_CMD=("$(cd "$(dirname "./.venv/bin/uvicorn")" && pwd)/$(basename "./.venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
-        elif [ -x "./router/.venv/bin/uvicorn" ]; then
-            START_CMD=("$(cd "$(dirname "./router/.venv/bin/uvicorn")" && pwd)/$(basename "./router/.venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
-        elif [ -x "./router/venv/bin/uvicorn" ]; then
-            START_CMD=("$(cd "$(dirname "./router/venv/bin/uvicorn")" && pwd)/$(basename "./router/venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
+        if [ -x "$ROOT_DIR/.venv/bin/uvicorn" ]; then
+            START_CMD=("$(cd "$(dirname "$ROOT_DIR/.venv/bin/uvicorn")" && pwd)/$(basename "$ROOT_DIR/.venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
+        elif [ -x "$ROOT_DIR/router/.venv/bin/uvicorn" ]; then
+            START_CMD=("$(cd "$(dirname "$ROOT_DIR/router/.venv/bin/uvicorn")" && pwd)/$(basename "$ROOT_DIR/router/.venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
+        elif [ -x "$ROOT_DIR/router/venv/bin/uvicorn" ]; then
+            START_CMD=("$(cd "$(dirname "$ROOT_DIR/router/venv/bin/uvicorn")" && pwd)/$(basename "$ROOT_DIR/router/venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
         elif command -v uvicorn &>/dev/null; then
             START_CMD=("$(command -v uvicorn)" "app:app" "--host" "127.0.0.1" "--port" "5555")
         else
@@ -231,11 +213,10 @@ start() {
 
     echo "Starting router with command: ${START_CMD[*]}"
     # start in router directory but manage pidfile from repo root
-    pushd router >/dev/null 2>&1 || return 1
+    pushd "$ROOT_DIR/router" >/dev/null 2>&1 || return 1
     nohup "${START_CMD[@]}" > "$START_LOG_FILE" 2>&1 &
     pid=$!
     popd >/dev/null 2>&1 || true
-    mkdir -p "$(dirname "$START_PID_FILE")"
     echo "$pid" > "$START_PID_FILE" || { echo "Failed to write pidfile $START_PID_FILE"; return 1; }
     sleep 1
     if kill -0 "$pid" 2>/dev/null; then
