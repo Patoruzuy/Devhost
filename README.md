@@ -58,7 +58,7 @@ docker compose up --build -d
 Notes & safety
 
 - `install.sh` is Debian/Ubuntu-oriented and will prompt you about DNS changes. Review DNS/resolver changes before applying them on systems using `systemd-resolved`.
-- We now generate both the project `caddy/Caddyfile` and, when present, the user `~/.config/caddy/Caddyfile` to keep local and system Caddy installs in sync.
+- We now generate the project `caddy/Caddyfile`, the user `~/.config/caddy/Caddyfile`, and (if present) `/etc/caddy/Caddyfile` to keep system Caddy installs in sync.
 - The router loads `devhost.json` per request so CLI changes take effect immediately without restarting the router.
 
 Quick Commands
@@ -66,6 +66,7 @@ Quick Commands
 - `devhost add <name> <port|host:port>` — add a mapping (e.g. `devhost add hello 3000`).
 - `devhost add <name> --http <port|host:port>` — force HTTP when opening the dev URL.
 - `devhost add <name> --https <port|host:port>` — force HTTPS when opening the dev URL.
+- Flags can be combined (e.g., `devhost add hello --wsl --http 8000`).
 - `devhost add <name> --wsl <port>` — map to the Windows host IP automatically when running in WSL.
 - `devhost remove <name>` — remove a mapping.
 - `devhost list` — show active mappings.

@@ -285,6 +285,16 @@ PY
         cp "$CADDYFILE" "$USER_CADDY"
     fi
 
+    # Update system Caddyfile if present (requires sudo)
+    SYSTEM_CADDY="/etc/caddy/Caddyfile"
+    if [ -f "$SYSTEM_CADDY" ]; then
+        if command -v sudo >/dev/null 2>&1; then
+            sudo cp "$CADDYFILE" "$SYSTEM_CADDY" 2>/dev/null || true
+        else
+            echo "Note: /etc/caddy/Caddyfile exists but sudo is not available to update it."
+        fi
+    fi
+
     # reload caddy if systemctl is available
     if command -v systemctl &> /dev/null; then
         sudo systemctl reload caddy || true
@@ -745,7 +755,7 @@ status() {
 }
 
 case "$1" in
-    add) add $2 $3 ;;
+    add) add "${@:2}" ;;
     remove) remove $2 ;;
     list) list ;;
     url) url $2 ;;
