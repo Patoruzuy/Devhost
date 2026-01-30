@@ -70,6 +70,10 @@ Quick Commands
 - `devhost open <name>` — open the HTTPS URL in the default browser.
 - `devhost validate` — quick health checks (config JSON, router health, DNS).
 - `devhost export caddy` — print the generated Caddyfile to stdout.
+- `devhost edit` — open `devhost.json` in `$EDITOR` (fallback: `nano`/`vi`).
+- `devhost resolve <name>` — show DNS resolution and port reachability for a mapping.
+- `devhost doctor` — deeper diagnostics (dnsmasq/systemd-resolved/Caddy).
+- `devhost info` — show all commands and usage.
 
 Configuration
 

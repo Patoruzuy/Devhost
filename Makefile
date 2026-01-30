@@ -5,7 +5,7 @@ else
 PY=$(VENV)/bin/python
 endif
 
-.PHONY: venv install start test docker-up docker-build lint help devhost-url devhost-open devhost-validate devhost-export-caddy
+.PHONY: venv install start test docker-up docker-build lint help devhost-url devhost-open devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info
 
 venv:
 	python -m venv $(VENV)
@@ -42,5 +42,17 @@ devhost-validate:
 devhost-export-caddy:
 	./devhost export caddy
 
+devhost-edit:
+	./devhost edit
+
+devhost-resolve:
+	./devhost resolve
+
+devhost-doctor:
+	./devhost doctor
+
+devhost-info:
+	./devhost info
+
 help:
-	@echo "Available targets: venv install start test docker-build docker-up lint devhost-url devhost-open devhost-validate devhost-export-caddy"
+	@echo "Available targets: venv install start test docker-build docker-up lint devhost-url devhost-open devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info"
