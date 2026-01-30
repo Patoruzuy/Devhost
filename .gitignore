@@ -1,5 +1,7 @@
 *.ps1
 .devhost/
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -8,3 +10,21 @@ venv/
 router/venv/
 router/.venv/
 .env
+
+# SQLite
+*.db
+
+# Node / Electron
+node_modules/
+dist/
+build/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+

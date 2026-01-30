@@ -35,16 +35,56 @@ fi
 echo "[+] Configuring dnsmasq..."
 DNSMASQ_CONF_DIR="/etc/dnsmasq.d"
 DNSMASQ_CONF_FILE="$DNSMASQ_CONF_DIR/devhost.conf"
+DNSMASQ_PORT=53
+DNSMASQ_LISTEN_ADDR="127.0.0.1"
+
+if command -v ss >/dev/null 2>&1 && ss -lntup 2>/dev/null | grep -qE '[:.]53\\s'; then
+    echo "[!] Port 53 is already in use. Configuring dnsmasq on 127.0.0.1:5353."
+    DNSMASQ_PORT=5353
+fi
+
 if [ -d "$DNSMASQ_CONF_DIR" ]; then
-    echo 'address=/localhost/127.0.0.1' | sudo tee "$DNSMASQ_CONF_FILE" >/dev/null
+    cat <<EOF | sudo tee "$DNSMASQ_CONF_FILE" >/dev/null
+address=/localhost/127.0.0.1
+listen-address=$DNSMASQ_LISTEN_ADDR
+bind-interfaces
+port=$DNSMASQ_PORT
+EOF
 else
     if ! grep -q '^address=/localhost/127.0.0.1$' /etc/dnsmasq.conf; then
         echo 'address=/localhost/127.0.0.1' | sudo tee -a /etc/dnsmasq.conf >/dev/null
     fi
+    if ! grep -q '^listen-address=127.0.0.1$' /etc/dnsmasq.conf; then
+        echo 'listen-address=127.0.0.1' | sudo tee -a /etc/dnsmasq.conf >/dev/null
+    fi
+    if ! grep -q '^bind-interfaces$' /etc/dnsmasq.conf; then
+        echo 'bind-interfaces' | sudo tee -a /etc/dnsmasq.conf >/dev/null
+    fi
+    if ! grep -q '^port=' /etc/dnsmasq.conf; then
+        echo "port=$DNSMASQ_PORT" | sudo tee -a /etc/dnsmasq.conf >/dev/null
+    fi
 fi
 
 if command -v systemctl &> /dev/null; then
-    sudo systemctl restart dnsmasq
+    sudo systemctl restart dnsmasq || true
+fi
+
+if [ "$DNSMASQ_PORT" -ne 53 ]; then
+    if command -v systemctl &> /dev/null && systemctl is-active --quiet systemd-resolved; then
+        echo "[+] Configuring systemd-resolved to forward *.localhost to 127.0.0.1:$DNSMASQ_PORT"
+        RESOLVED_DROPIN_DIR="/etc/systemd/resolved.conf.d"
+        RESOLVED_DROPIN_FILE="$RESOLVED_DROPIN_DIR/devhost.conf"
+        sudo mkdir -p "$RESOLVED_DROPIN_DIR"
+        cat <<EOF | sudo tee "$RESOLVED_DROPIN_FILE" >/dev/null
+[Resolve]
+DNS=127.0.0.1#$DNSMASQ_PORT
+Domains=~localhost
+EOF
+        sudo systemctl restart systemd-resolved
+    else
+        echo "[!] systemd-resolved not active. Port 53 is in use, so dnsmasq is on $DNSMASQ_PORT."
+        echo "    You may need to free port 53 or configure your resolver to use 127.0.0.1#$DNSMASQ_PORT for *.localhost."
+    fi
 fi
 
 # Configure resolv.conf (informational only)
