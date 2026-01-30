@@ -13,6 +13,24 @@ load_json() {
     if [[ ! -f $CONFIG ]]; then
         echo "{}" > $CONFIG
     fi
+    if command -v jq &> /dev/null; then
+        if ! jq empty "$CONFIG" >/dev/null 2>&1; then
+            echo "{}" > "$CONFIG"
+        fi
+    else
+        if [ -n "$PYTHON_BIN" ]; then
+            if ! "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+import json,sys
+try:
+    json.load(open("devhost.json"))
+except Exception:
+    sys.exit(1)
+PY
+            then
+                echo "{}" > "$CONFIG"
+            fi
+        fi
+    fi
     cat "$CONFIG"
 }
 
@@ -86,7 +104,10 @@ add() {
         fi
         new_json=$("$PYTHON_BIN" - "$domain" "$port" <<PY
 import json,sys
-data=json.load(open('devhost.json'))
+try:
+    data=json.load(open('devhost.json'))
+except Exception:
+    data={}
 data[sys.argv[1]] = int(sys.argv[2])
 print(json.dumps(data))
 PY
@@ -109,7 +130,10 @@ remove() {
         fi
         new_json=$("$PYTHON_BIN" - "$domain" <<PY
 import json,sys
-data=json.load(open('devhost.json'))
+try:
+    data=json.load(open('devhost.json'))
+except Exception:
+    data={}
 data.pop(sys.argv[1], None)
 print(json.dumps(data))
 PY
@@ -129,7 +153,7 @@ list() {
             echo "$json"
             return 0
         fi
-        "$PYTHON_BIN" - <<PY
+        echo "$json" | "$PYTHON_BIN" - <<PY
 import json,sys
 try:
     data=json.load(sys.stdin)
