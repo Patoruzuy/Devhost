@@ -61,6 +61,24 @@ PY
     fi
 }
 
+detect_wsl_host_ip() {
+    # Prefer Windows vEthernet (WSL) IP via PowerShell
+    if command -v powershell.exe >/dev/null 2>&1; then
+        ip=$(powershell.exe -NoProfile -Command "Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL*' -AddressFamily IPv4 | Select-Object -First 1 -ExpandProperty IPAddress" 2>/dev/null | tr -d '\r')
+        if [ -n "$ip" ]; then
+            echo "$ip"
+            return 0
+        fi
+    fi
+    # Fallback to nameserver in /etc/resolv.conf
+    ip=$(grep -m1 '^nameserver ' /etc/resolv.conf 2>/dev/null | awk '{print $2}')
+    if [ -n "$ip" ]; then
+        echo "$ip"
+        return 0
+    fi
+    return 1
+}
+
 
 normalize_target() {
     value=$1
@@ -847,20 +865,3 @@ case "$1" in
         ;;
     *) print_usage;;
 esac
-detect_wsl_host_ip() {
-    # Prefer Windows vEthernet (WSL) IP via PowerShell
-    if command -v powershell.exe >/dev/null 2>&1; then
-        ip=$(powershell.exe -NoProfile -Command "Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL*' -AddressFamily IPv4 | Select-Object -First 1 -ExpandProperty IPAddress" 2>/dev/null | tr -d '\r')
-        if [ -n "$ip" ]; then
-            echo "$ip"
-            return 0
-        fi
-    fi
-    # Fallback to nameserver in /etc/resolv.conf
-    ip=$(grep -m1 '^nameserver ' /etc/resolv.conf 2>/dev/null | awk '{print $2}')
-    if [ -n "$ip" ]; then
-        echo "$ip"
-        return 0
-    fi
-    return 1
-}
