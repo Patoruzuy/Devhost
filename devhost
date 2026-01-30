@@ -2,6 +2,12 @@
 
 CONFIG="devhost.json"
 CADDYFILE="caddy/Caddyfile"
+PYTHON_BIN=""
+if command -v python3 &> /dev/null; then
+    PYTHON_BIN="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_BIN="python"
+fi
 
 load_json() {
     if [[ ! -f $CONFIG ]]; then
@@ -33,7 +39,11 @@ generate_caddyfile() {
         fi
     else
         # fallback: use python to render mappings
-        python - <<PY >> "$CADDYFILE"
+        if [ -z "$PYTHON_BIN" ]; then
+            echo "python3 (or python) is required to render mappings without jq."
+            return 1
+        fi
+        "$PYTHON_BIN" - <<PY >> "$CADDYFILE"
 import json,sys
 try:
     data=json.load(open('devhost.json'))
@@ -70,13 +80,17 @@ add() {
     if command -v jq &> /dev/null; then
         new_json=$(echo "$json" | jq --arg k "$domain" --arg p "$port" '. + {($k): ($p|tonumber)}')
     else
-        new_json=$(python - <<PY
+        if [ -z "$PYTHON_BIN" ]; then
+            echo "python3 (or python) is required to add mappings without jq."
+            return 1
+        fi
+        new_json=$("$PYTHON_BIN" - "$domain" "$port" <<PY
 import json,sys
 data=json.load(open('devhost.json'))
 data[sys.argv[1]] = int(sys.argv[2])
 print(json.dumps(data))
 PY
-$domain $port)
+)
     fi
     save_json "$new_json"
     echo "[+] Mapped $domain.localhost to port $port"
@@ -89,13 +103,17 @@ remove() {
     if command -v jq &> /dev/null; then
         new_json=$(echo "$json" | jq --arg k "$domain" 'del(.[$k])')
     else
-        new_json=$(python - <<PY
+        if [ -z "$PYTHON_BIN" ]; then
+            echo "python3 (or python) is required to remove mappings without jq."
+            return 1
+        fi
+        new_json=$("$PYTHON_BIN" - "$domain" <<PY
 import json,sys
 data=json.load(open('devhost.json'))
 data.pop(sys.argv[1], None)
 print(json.dumps(data))
 PY
-$domain)
+)
     fi
     save_json "$new_json"
     echo "[-] Removed mapping for $domain.localhost"
@@ -107,7 +125,11 @@ list() {
     if command -v jq &> /dev/null; then
         echo "$json" | jq
     else
-        python - <<PY
+        if [ -z "$PYTHON_BIN" ]; then
+            echo "$json"
+            return 0
+        fi
+        "$PYTHON_BIN" - <<PY
 import json,sys
 try:
     data=json.load(sys.stdin)
