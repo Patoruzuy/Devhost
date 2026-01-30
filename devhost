@@ -63,21 +63,29 @@ PY
 
 normalize_target() {
     value=$1
+    scheme="http"
     host="127.0.0.1"
     port=""
+    rest="$value"
 
-    if [[ "$value" == *":"* ]]; then
-        host="${value%:*}"
-        port="${value##*:}"
+    if [[ "$rest" =~ ^https?:// ]]; then
+        scheme="${rest%%://*}"
+        rest="${rest#*://}"
+        rest="${rest%%/*}"
+    fi
+
+    if [[ "$rest" == *":"* ]]; then
+        host="${rest%:*}"
+        port="${rest##*:}"
     else
-        port="$value"
+        port="$rest"
     fi
 
     if [ -z "$host" ] || [ -z "$port" ]; then
         echo ""
         return 1
     fi
-    echo "${host}:${port}"
+    echo "${scheme} ${host} ${port}"
 }
 
 open_in_browser() {
@@ -104,8 +112,10 @@ print_usage() {
 Usage: devhost <command> [args]
 
 Commands:
-  add <name> <port|host:port>  Add a mapping
-  add <name> --wsl <port>      Map to Windows host IP when running in WSL
+  add <name> <port|host:port>          Add a mapping
+  add <name> --http <port|host:port>   Force http for dev URL
+  add <name> --https <port|host:port>  Force https for dev URL
+  add <name> --wsl <port>              Map to Windows host IP when running in WSL
   remove <name>           Remove a mapping
   list                    List mappings
   url [name]              Print HTTPS URL; press Ctrl+O to open (interactive)
@@ -148,7 +158,10 @@ resolve_mapping() {
     else
         normalized=$(normalize_target "$target" || true)
         if [ -n "$normalized" ]; then
-            echo "${name}.localhost -> ${normalized}"
+            scheme=$(echo "$normalized" | awk '{print $1}')
+            host=$(echo "$normalized" | awk '{print $2}')
+            port=$(echo "$normalized" | awk '{print $3}')
+            echo "${name}.localhost -> ${scheme}://${host}:${port}"
         else
             echo "${name}.localhost -> ${target}"
         fi
@@ -174,8 +187,9 @@ resolve_mapping() {
 
     if [ -n "$target" ] && command -v nc >/dev/null 2>&1; then
         normalized=$(normalize_target "$target" || true)
-        host="${normalized%:*}"
-        port="${normalized##*:}"
+        scheme=$(echo "$normalized" | awk '{print $1}')
+        host=$(echo "$normalized" | awk '{print $2}')
+        port=$(echo "$normalized" | awk '{print $3}')
         if nc -z "$host" "$port" >/dev/null 2>&1; then
             echo "Port: ${host}:${port} is open"
         else
@@ -237,7 +251,7 @@ generate_caddyfile() {
         if [[ $mapcount -gt 0 ]]; then
             echo "" >> "$CADDYFILE"
             echo "# Direct mappings" >> "$CADDYFILE"
-            echo "$json" | jq -r 'to_entries[] | "\(.key).localhost {\n    reverse_proxy \(.value | tostring | if test(\":\") then . else \"localhost:\" + . end)\n    tls internal\n}\n"' >> "$CADDYFILE"
+            echo "$json" | jq -r 'to_entries[] | "\(.key).localhost {\n    reverse_proxy \(.value | tostring | if test(\"^https?://\") then . elif test(\":\") then . else \"localhost:\" + . end)\n    tls internal\n}\n"' >> "$CADDYFILE"
         fi
     else
         # fallback: use python to render mappings
@@ -254,7 +268,9 @@ except Exception:
 for k,v in data.items():
     print(f"{k}.localhost {{")
     target = str(v)
-    if ":" in target:
+    if target.startswith("http://") or target.startswith("https://"):
+        print(f"    reverse_proxy {target}")
+    elif ":" in target:
         print(f"    reverse_proxy {target}")
     else:
         print(f"    reverse_proxy localhost:{target}")
@@ -288,7 +304,7 @@ print_caddyfile() {
         if [[ $mapcount -gt 0 ]]; then
             echo ""
             echo "# Direct mappings"
-            echo "$json" | jq -r 'to_entries[] | "\(.key).localhost {\n    reverse_proxy \(.value | tostring | if test(\":\") then . else \"localhost:\" + . end)\n    tls internal\n}\n"'
+            echo "$json" | jq -r 'to_entries[] | "\(.key).localhost {\n    reverse_proxy \(.value | tostring | if test(\"^https?://\") then . elif test(\":\") then . else \"localhost:\" + . end)\n    tls internal\n}\n"'
         fi
     else
         if [ -z "$PYTHON_BIN" ]; then
@@ -303,7 +319,13 @@ except Exception:
     data={}
 for k,v in data.items():
     print(f"{k}.localhost {{")
-    print(f"    reverse_proxy localhost:{v}")
+    target = str(v)
+    if target.startswith("http://") or target.startswith("https://"):
+        print(f"    reverse_proxy {target}")
+    elif ":" in target:
+        print(f"    reverse_proxy {target}")
+    else:
+        print(f"    reverse_proxy localhost:{target}")
     print("    tls internal")
     print("}")
 PY
@@ -312,42 +334,87 @@ PY
 
 add() {
     domain=$1
-    port=$2
-    if [ "$port" = "--wsl" ]; then
-        port=$3
+    shift
+    scheme=""
+    use_wsl=false
+    target=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --wsl) use_wsl=true; shift ;;
+            --http) scheme="http"; shift ;;
+            --https) scheme="https"; shift ;;
+            *) target="$1"; shift ;;
+        esac
+    done
+
+    if [ -z "$target" ]; then
+        echo "Usage: devhost add <name> <port|host:port>"
+        return 1
+    fi
+
+    if $use_wsl; then
         wsl_ns=$(grep -m1 '^nameserver ' /etc/resolv.conf 2>/dev/null | awk '{print $2}')
         if [ -z "$wsl_ns" ]; then
             echo "WSL host IP not found in /etc/resolv.conf"
             return 1
         fi
-        port="${wsl_ns}:${port}"
+        target="${wsl_ns}:${target}"
     fi
+
+    if [ -n "$scheme" ]; then
+        if [[ "$target" =~ ^https?:// ]]; then
+            echo "Target already includes a scheme; do not combine with --http/--https"
+            return 1
+        fi
+        target="${scheme}://${target}"
+    fi
+
     json=$(load_json)
-    if [[ "$port" == *":"* ]]; then
-        host_part="${port%:*}"
-        port_part="${port##*:}"
+    # validate target
+    if [[ "$target" =~ ^https?:// ]]; then
+        stripped="${target#*://}"
+        stripped="${stripped%%/*}"
+        if [[ "$stripped" == *":"* ]]; then
+            host_part="${stripped%:*}"
+            port_part="${stripped##*:}"
+            if [ -z "$host_part" ] || ! [[ $port_part =~ ^[0-9]+$ ]]; then
+                echo "Port must be a number or host:port"
+                return 1
+            fi
+        else
+            if ! [[ "$stripped" =~ ^[0-9]+$ ]]; then
+                echo "Port must be a number or host:port"
+                return 1
+            fi
+        fi
+    elif [[ "$target" == *":"* ]]; then
+        host_part="${target%:*}"
+        port_part="${target##*:}"
         if [ -z "$host_part" ] || ! [[ $port_part =~ ^[0-9]+$ ]]; then
             echo "Port must be a number or host:port"
             return 1
         fi
     else
-        if ! [[ $port =~ ^[0-9]+$ ]]; then
+        if ! [[ $target =~ ^[0-9]+$ ]]; then
             echo "Port must be a number or host:port"
             return 1
         fi
     fi
     if command -v jq &> /dev/null; then
-        if [[ "$port" == *":"* ]]; then
-            new_json=$(echo "$json" | jq --arg k "$domain" --arg p "$port" '. + {($k): $p}')
+        if [[ "$target" =~ ^https?:// ]]; then
+            new_json=$(echo "$json" | jq --arg k "$domain" --arg p "$target" '. + {($k): $p}')
+        elif [[ "$target" == *":"* ]]; then
+            new_json=$(echo "$json" | jq --arg k "$domain" --arg p "$target" '. + {($k): $p}')
         else
-            new_json=$(echo "$json" | jq --arg k "$domain" --arg p "$port" '. + {($k): ($p|tonumber)}')
+            new_json=$(echo "$json" | jq --arg k "$domain" --arg p "$target" '. + {($k): ($p|tonumber)}')
         fi
     else
         if [ -z "$PYTHON_BIN" ]; then
             echo "python3 (or python) is required to add mappings without jq."
             return 1
         fi
-        new_json=$("$PYTHON_BIN" - "$CONFIG" "$domain" "$port" <<PY
+        new_json=$("$PYTHON_BIN" - "$CONFIG" "$domain" "$target" <<PY
 import json,sys
 try:
     data=json.load(open(sys.argv[1]))
@@ -364,7 +431,7 @@ PY
 )
     fi
     save_json "$new_json"
-    echo "[+] Mapped $domain.localhost to $port"
+    echo "[+] Mapped $domain.localhost to $target"
     generate_caddyfile
 }
 
@@ -422,13 +489,20 @@ url() {
             return 1
         fi
     fi
-    echo "https://${name}.localhost"
+    target=$(get_port_for_name "$name")
+    if [ -z "$target" ]; then
+        echo "No mapping found for ${name}.localhost"
+        return 1
+    fi
+    normalized=$(normalize_target "$target" || true)
+    scheme=$(echo "$normalized" | awk '{print $1}')
+    echo "${scheme}://${name}.localhost"
     # Optional: open when Ctrl+O is pressed (interactive only)
     if [ -t 0 ]; then
         read -r -n 1 -s -p "Press Ctrl+O to open in browser, any other key to skip... " key
         echo
         if [ "$key" = $'\x0f' ]; then
-            open_in_browser "https://${name}.localhost"
+            open_in_browser "${scheme}://${name}.localhost"
         fi
     fi
 }
@@ -442,7 +516,14 @@ open_cmd() {
             return 1
         fi
     fi
-    open_in_browser "https://${name}.localhost"
+    target=$(get_port_for_name "$name")
+    if [ -z "$target" ]; then
+        echo "No mapping found for ${name}.localhost"
+        return 1
+    fi
+    normalized=$(normalize_target "$target" || true)
+    scheme=$(echo "$normalized" | awk '{print $1}')
+    open_in_browser "${scheme}://${name}.localhost"
 }
 
 validate() {

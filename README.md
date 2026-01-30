@@ -64,6 +64,8 @@ Notes & safety
 Quick Commands
 
 - `devhost add <name> <port|host:port>` — add a mapping (e.g. `devhost add hello 3000`).
+- `devhost add <name> --http <port|host:port>` — force HTTP when opening the dev URL.
+- `devhost add <name> --https <port|host:port>` — force HTTPS when opening the dev URL.
 - `devhost add <name> --wsl <port>` — map to the Windows host IP automatically when running in WSL.
 - `devhost remove <name>` — remove a mapping.
 - `devhost list` — show active mappings.

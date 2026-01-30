@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import uvicorn
 from typing import Optional, Dict, Tuple
+from urllib.parse import urlparse
 
 app = FastAPI()
 
@@ -58,23 +59,28 @@ def load_routes() -> Dict[str, int]:
     return {}
 
 
-def parse_target(value) -> Optional[Tuple[str, int]]:
+def parse_target(value) -> Optional[Tuple[str, int, str]]:
     if value is None:
         return None
     if isinstance(value, int):
         if value > 0:
-            return ("127.0.0.1", value)
+            return ("http", "127.0.0.1", value)
         return None
     if isinstance(value, str):
+        if value.startswith("http://") or value.startswith("https://"):
+            parsed = urlparse(value)
+            if parsed.hostname and parsed.port:
+                return (parsed.scheme, parsed.hostname, parsed.port)
+            return None
         if ":" in value:
             host, port = value.rsplit(":", 1)
             if host and port.isdigit():
-                return (host, int(port))
+                return ("http", host, int(port))
             return None
         if value.isdigit():
             port = int(value)
             if port > 0:
-                return ("127.0.0.1", port)
+                return ("http", "127.0.0.1", port)
             return None
     return None
 
@@ -99,10 +105,10 @@ async def wildcard_proxy(request: Request, full_path: str):
     target = parse_target(target_value)
     if not target:
         return JSONResponse({"error": f"No route found for {subdomain}.localhost"}, status_code=404)
-    target_host, target_port = target
+    target_scheme, target_host, target_port = target
 
     # build upstream URL and preserve query string
-    url = f"http://{target_host}:{target_port}{request.url.path}"
+    url = f"{target_scheme}://{target_host}:{target_port}{request.url.path}"
     if request.url.query:
         url = url + "?" + request.url.query
 
