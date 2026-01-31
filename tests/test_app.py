@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import tempfile
 import unittest
@@ -41,12 +42,29 @@ class DummyAsyncClient:
 
 class RouterTests(unittest.TestCase):
     def setUp(self):
+        self.router_logger = logging.getLogger("devhost.router")
+        self.router_logger_level = self.router_logger.level
+        self.router_logger.setLevel(logging.ERROR)
+        self.httpx_logger = logging.getLogger("httpx")
+        self.httpx_logger_level = self.httpx_logger.level
+        self.httpx_logger.setLevel(logging.ERROR)
+        self.default_config_path = self._write_config({})
+        self.config_patch = patch.dict(os.environ, {"DEVHOST_CONFIG": self.default_config_path}, clear=False)
+        self.config_patch.start()
         self.env_patch = patch.dict(os.environ, {"DEVHOST_DOMAIN": "localhost"}, clear=False)
         self.env_patch.start()
         self.client = TestClient(app)
 
     def tearDown(self):
         self.env_patch.stop()
+        self.config_patch.stop()
+        self.router_logger.setLevel(self.router_logger_level)
+        self.httpx_logger.setLevel(self.httpx_logger_level)
+        if getattr(self, "default_config_path", None):
+            try:
+                os.unlink(self.default_config_path)
+            except FileNotFoundError:
+                pass
 
     def _write_config(self, data):
         tmp = tempfile.NamedTemporaryFile("w", delete=False)
@@ -80,7 +98,7 @@ class RouterTests(unittest.TestCase):
             self.assertEqual(resp.status_code, 404)
         finally:
             os.unlink(path)
-            os.environ.pop("DEVHOST_CONFIG", None)
+            os.environ["DEVHOST_CONFIG"] = self.default_config_path
 
     def test_proxy_url_and_headers(self):
         path = self._write_config({"hello": 3000})
@@ -96,7 +114,7 @@ class RouterTests(unittest.TestCase):
             self.assertNotIn("connection", resp.headers)
         finally:
             os.unlink(path)
-            os.environ.pop("DEVHOST_CONFIG", None)
+            os.environ["DEVHOST_CONFIG"] = self.default_config_path
 
 
 if __name__ == "__main__":

@@ -3,12 +3,21 @@ from fastapi.responses import Response, JSONResponse
 import httpx
 import json
 import os
+import logging
+import asyncio
 from pathlib import Path
 import uvicorn
 from typing import Optional, Dict, Tuple
 from urllib.parse import urlparse
 
 app = FastAPI()
+
+LOG_LEVEL = os.getenv("DEVHOST_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+)
+logger = logging.getLogger("devhost.router")
 
 
 def load_domain() -> str:
@@ -70,17 +79,72 @@ def _config_candidates() -> list[Path]:
     return unique
 
 
-def load_routes() -> Dict[str, int]:
+def _load_routes_from_path(path: Path) -> Optional[Dict[str, int]]:
+    try:
+        content = path.read_text()
+        if not content.strip():
+            return {}
+        data = json.loads(content)
+        if isinstance(data, dict):
+            return {str(k).lower(): v for k, v in data.items()}
+    except Exception as exc:
+        logger.warning("Failed to load config from %s: %s", path, exc)
+        return None
+    return {}
+
+
+def _select_config_path() -> Optional[Path]:
     for path in _config_candidates():
         try:
             if path.is_file():
-                with path.open() as f:
-                    data = json.load(f)
-                if isinstance(data, dict):
-                    return {str(k).lower(): v for k, v in data.items()}
+                return path
         except Exception:
             continue
-    return {}
+    return None
+
+
+class RouteCache:
+    def __init__(self) -> None:
+        self._routes: Dict[str, int] = {}
+        self._last_mtime: float = 0.0
+        self._last_path: Optional[Path] = None
+        self._lock = asyncio.Lock()
+
+    async def get_routes(self) -> Dict[str, int]:
+        path = _select_config_path()
+        if not path:
+            if self._routes:
+                logger.info("Config file not found; clearing routes cache.")
+                self._routes = {}
+                self._last_mtime = 0.0
+                self._last_path = None
+            return {}
+        try:
+            mtime = path.stat().st_mtime
+        except Exception as exc:
+            logger.warning("Failed to stat config file %s: %s", path, exc)
+            return self._routes
+
+        if self._last_path != path or mtime > self._last_mtime:
+            async with self._lock:
+                try:
+                    mtime = path.stat().st_mtime
+                except Exception as exc:
+                    logger.warning("Failed to stat config file %s: %s", path, exc)
+                    return self._routes
+                if self._last_path != path or mtime > self._last_mtime:
+                    loaded = _load_routes_from_path(path)
+                    if loaded is None:
+                        logger.warning("Keeping previous routes due to config parse error.")
+                    else:
+                        self._routes = loaded
+                        logger.info("Loaded %d routes from %s", len(self._routes), path)
+                    self._last_mtime = mtime
+                    self._last_path = path
+        return self._routes
+
+
+ROUTE_CACHE = RouteCache()
 
 
 def parse_target(value) -> Optional[Tuple[str, int, str]]:
@@ -115,20 +179,66 @@ async def health():
     return JSONResponse({"status": "ok", "version": "v1.0.0"})
 
 
+async def _check_tcp(host: str, port: int, timeout: float = 0.5) -> bool:
+    try:
+        conn = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        reader, writer = conn
+        writer.close()
+        if hasattr(writer, "wait_closed"):
+            await writer.wait_closed()
+        return True
+    except Exception:
+        return False
+
+
+@app.get("/mappings")
+async def mappings():
+    """Return current mappings with basic TCP health checks."""
+    routes = await ROUTE_CACHE.get_routes()
+    results = {}
+    checks = []
+    names = []
+    for name, target_value in routes.items():
+        target = parse_target(target_value)
+        if not target:
+            results[name] = {"target": target_value, "healthy": False, "error": "invalid target"}
+            continue
+        scheme, host, port = target
+        names.append(name)
+        checks.append(_check_tcp(host, port))
+        results[name] = {"target": f"{scheme}://{host}:{port}"}
+    if checks:
+        statuses = await asyncio.gather(*checks, return_exceptions=True)
+        for idx, status in enumerate(statuses):
+            healthy = bool(status is True)
+            results[names[idx]]["healthy"] = healthy
+    return JSONResponse({"domain": load_domain(), "mappings": results})
+
+
 @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def wildcard_proxy(request: Request, full_path: str):
-    # Load routes on each request so CLI updates take effect immediately
-    routes = load_routes()
+    routes = await ROUTE_CACHE.get_routes()
 
     host_header = request.headers.get("host", "")
     base_domain = load_domain()
     subdomain = extract_subdomain(host_header, base_domain)
     if not subdomain:
+        if host_header in {"127.0.0.1:5555", "localhost:5555", "127.0.0.1", "localhost", ""}:
+            logger.info("Direct router access without Host header: %s", host_header)
+            return JSONResponse(
+                {
+                    "error": "Missing or invalid Host header",
+                    "hint": "Use devhost open <name> or send Host header (e.g. curl -H 'Host: hello.localhost' http://127.0.0.1:5555/)",
+                },
+                status_code=400,
+            )
+        logger.warning("Invalid Host header: %s", host_header)
         return JSONResponse({"error": "Missing or invalid Host header"}, status_code=400)
 
     target_value = routes.get(subdomain)
     target = parse_target(target_value)
     if not target:
+        logger.info("No route found for %s.%s", subdomain, base_domain)
         return JSONResponse({"error": f"No route found for {subdomain}.{base_domain}"}, status_code=404)
     target_scheme, target_host, target_port = target
 
@@ -150,6 +260,7 @@ async def wildcard_proxy(request: Request, full_path: str):
                 timeout=30.0,
             )
         except httpx.RequestError as exc:
+            logger.warning("Upstream request failed for %s.%s -> %s: %s", subdomain, base_domain, url, exc)
             return JSONResponse({"error": f"Upstream request failed: {exc}"}, status_code=502)
 
     # Filter hop-by-hop headers

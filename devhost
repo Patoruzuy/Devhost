@@ -23,7 +23,9 @@ load_json() {
 }
 
 save_json() {
-    echo "$1" > "$CONFIG"
+    tmpfile="$(mktemp "${CONFIG}.tmp.XXXXXX")" || return 1
+    printf '%s' "$1" > "$tmpfile"
+    mv "$tmpfile" "$CONFIG"
 }
 
 first_mapping_name() {
@@ -131,6 +133,34 @@ get_dev_scheme() {
     fi
 }
 
+validate_name() {
+    name=$1
+    if [ -z "$name" ]; then
+        echo "Name is required."
+        return 1
+    fi
+    if [ ${#name} -gt 63 ]; then
+        echo "Name too long (max 63 chars)."
+        return 1
+    fi
+    if ! echo "$name" | grep -qE '^[A-Za-z0-9-]+$'; then
+        echo "Invalid name. Use only letters, numbers, and hyphens."
+        return 1
+    fi
+    return 0
+}
+
+validate_port_range() {
+    port=$1
+    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+    if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        return 1
+    fi
+    return 0
+}
+
 open_in_browser() {
     url=$1
     if command -v xdg-open >/dev/null 2>&1; then
@@ -170,6 +200,7 @@ Commands:
   doctor                  Deeper diagnostics (dnsmasq/systemd-resolved/Caddy)
   info                    Show this help
   domain [name]           Show or set base domain (default: localhost)
+  hosts <sync|clear>      Windows-only hosts management (use devhost.ps1)
   start|stop|status       Manage router process
   install --macos [...]   Run macOS installer
   install --windows       Run Windows installer
@@ -435,6 +466,10 @@ add() {
         esac
     done
 
+    if ! validate_name "$domain"; then
+        return 1
+    fi
+
     if [ -z "$target" ]; then
         echo "Usage: devhost add <name> <port|host:port>"
         return 1
@@ -459,12 +494,12 @@ add() {
         if [[ "$stripped" == *":"* ]]; then
             host_part="${stripped%:*}"
             port_part="${stripped##*:}"
-            if [ -z "$host_part" ] || ! [[ $port_part =~ ^[0-9]+$ ]]; then
+            if [ -z "$host_part" ] || ! validate_port_range "$port_part"; then
                 echo "Port must be a number or host:port"
                 return 1
             fi
         else
-            if ! [[ "$stripped" =~ ^[0-9]+$ ]]; then
+            if ! validate_port_range "$stripped"; then
                 echo "Port must be a number or host:port"
                 return 1
             fi
@@ -472,12 +507,12 @@ add() {
     elif [[ "$target" == *":"* ]]; then
         host_part="${target%:*}"
         port_part="${target##*:}"
-        if [ -z "$host_part" ] || ! [[ $port_part =~ ^[0-9]+$ ]]; then
+        if [ -z "$host_part" ] || ! validate_port_range "$port_part"; then
             echo "Port must be a number or host:port"
             return 1
         fi
     else
-        if ! [[ $target =~ ^[0-9]+$ ]]; then
+        if ! validate_port_range "$target"; then
             echo "Port must be a number or host:port"
             return 1
         fi
@@ -879,6 +914,7 @@ case "$1" in
     edit) edit_config ;;
     resolve) resolve_mapping $2 ;;
     doctor) doctor ;;
+    hosts) hosts_cmd ;;
     domain)
         if [ -n "${2:-}" ]; then
             set_domain "$2"
@@ -920,3 +956,8 @@ case "$1" in
         ;;
     *) print_usage;;
 esac
+hosts_cmd() {
+    echo "Hosts management is supported on Windows via devhost.ps1."
+    echo "Usage: devhost.ps1 hosts sync|clear"
+    return 1
+}

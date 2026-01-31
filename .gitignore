@@ -2,6 +2,8 @@
 !devhost.ps1
 !scripts/setup-windows.ps1
 .devhost/
+devhost.json
+caddy/Caddyfile
 
 # Python
 __pycache__/
@@ -29,3 +31,4 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+devhost-review.md

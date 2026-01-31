@@ -84,10 +84,14 @@ Quick Commands
 - `devhost edit` — open `devhost.json` in `$EDITOR` (fallback: `nano`/`vi`).
 - `devhost resolve <name>` — show DNS resolution and port reachability for a mapping.
 - `devhost doctor` — deeper diagnostics (dnsmasq/systemd-resolved/Caddy).
+- `devhost doctor --windows` — Windows-specific diagnostics (Caddy, port 80, hosts).
+- `devhost doctor --windows --fix` — attempt Windows fixes (hosts sync + free port 80 + start Caddy).
 - `devhost info` — show all commands and usage.
 - `devhost status --json` — print router status as JSON (running, pid, health).
 - `devhost domain [name]` — show or set the base domain (default: `localhost`).
 - `devhost hosts sync` — re-apply hosts entries for all mappings on Windows (admin).
+- `devhost hosts clear` — remove all devhost entries from the Windows hosts file (admin).
+- `devhost caddy start|stop|restart|status` — manage Caddy on Windows.
 
 Configuration
 
@@ -100,7 +104,7 @@ The project uses a `devhost.json` file (project root) with a simple mapping of n
 }
 ```
 
-The router reads `DEVHOST_CONFIG` if set; otherwise it looks for the project root `devhost.json` (even when run from `router/`). The base domain comes from `DEVHOST_DOMAIN` or `.devhost/domain` (default: `localhost`).
+This file is created/updated by the CLI and is meant to be local (it’s gitignored). The router reads `DEVHOST_CONFIG` if set; otherwise it looks for the project root `devhost.json` (even when run from `router/`). The base domain comes from `DEVHOST_DOMAIN` or `.devhost/domain` (default: `localhost`).
 
 Quick test (curl)
 
@@ -112,7 +116,7 @@ curl -H "Host: hello.localhost" http://127.0.0.1:5555/
 
 Regenerating Caddyfile
 
-The `devhost` CLI writes both the project `caddy/Caddyfile` and, when present, the user `~/.config/caddy/Caddyfile`. Inspect generated files before reloading system Caddy and, when appropriate, reload the service:
+The `devhost` CLI writes both the project `caddy/Caddyfile` (generated, gitignored) and, when present, the user `~/.config/caddy/Caddyfile`. Inspect generated files before reloading system Caddy and, when appropriate, reload the service:
 
 ```bash
 # inspect

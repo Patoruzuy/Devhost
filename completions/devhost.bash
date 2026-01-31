@@ -4,7 +4,7 @@ _devhost_completions() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    cmds="add remove list url open validate export edit resolve doctor info domain start stop status install"
+    cmds="add remove list url open validate export edit resolve doctor info domain hosts caddy start stop status install"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${cmds}" -- "$cur") )
@@ -44,6 +44,18 @@ PY
             ;;
         status)
             COMPREPLY=( $(compgen -W "--json" -- "$cur") )
+            return 0
+            ;;
+        doctor)
+            COMPREPLY=( $(compgen -W "--windows" -- "$cur") )
+            return 0
+            ;;
+        hosts)
+            COMPREPLY=( $(compgen -W "sync clear" -- "$cur") )
+            return 0
+            ;;
+        caddy)
+            COMPREPLY=( $(compgen -W "start stop restart status" -- "$cur") )
             return 0
             ;;
         install)
