@@ -41,15 +41,17 @@ class Colors:
 
 
 def _enable_colors() -> None:
+    if os.environ.get("NO_COLOR"):
+        Colors.disable()
+        return
     if not sys.stdout.isatty():
         Colors.disable()
         return
-    if IS_WINDOWS and not (
-        os.environ.get("ANSICON")
-        or os.environ.get("WT_SESSION")
-        or os.environ.get("ConEmuANSI") == "ON"
-    ):
-        Colors.disable()
+    if IS_WINDOWS:
+        try:
+            os.system("")
+        except Exception:
+            pass
 
 
 _enable_colors()
@@ -522,10 +524,30 @@ def windows_install(domain: str, args) -> int:
             ], capture=True)
             name = proc_name.stdout.strip() or "unknown"
             msg_warn(f"Port 80 is in use by {name} (pid {pid}).")
-            if name == "wslrelay" and shutil.which("wsl"):
+            if name.lower() == "wslrelay" and shutil.which("wsl"):
                 if prompt_yes_no("Shutdown WSL now to free port 80?", True, args.yes):
                     run(["wsl", "--shutdown"], check=False)
                     msg_ok("WSL shut down.")
+            else:
+                if prompt_yes_no(f"Stop {name} (pid {pid}) to free port 80?", False, args.yes):
+                    if name.lower() == "caddy":
+                        exe = find_caddy_exe()
+                        if exe:
+                            run([exe, "stop"], check=False)
+                        else:
+                            run([
+                                "powershell",
+                                "-NoProfile",
+                                "-Command",
+                                f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue",
+                            ], check=False)
+                    else:
+                        run([
+                            "powershell",
+                            "-NoProfile",
+                            "-Command",
+                            f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue",
+                        ], check=False)
         except Exception:
             pass
 

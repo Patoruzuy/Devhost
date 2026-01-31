@@ -59,14 +59,15 @@ class Colors:
         cls.RESET = cls.RED = cls.GREEN = cls.YELLOW = cls.BLUE = cls.GRAY = ""
 
 
-if not sys.stdout.isatty():
+if os.environ.get("NO_COLOR"):
     Colors.disable()
-elif IS_WINDOWS and not (
-    os.environ.get("ANSICON")
-    or os.environ.get("WT_SESSION")
-    or os.environ.get("ConEmuANSI") == "ON"
-):
+elif not sys.stdout.isatty():
     Colors.disable()
+elif IS_WINDOWS:
+    try:
+        os.system("")
+    except Exception:
+        pass
 
 
 def msg_success(text: str):
