@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on "Keep a Changelog" and this project follows
 Semantic Versioning.
 
+## [Unreleased]
+### Added
+- `devhost fix-http` to convert `https://` mappings back to `http://`.
+- `devhost.ps1` PowerShell shim for easier Windows invocation.
+
+### Changed
+- Wildcard Caddy vhost now defaults to HTTP-only (HTTPS is per-mapping with `--https`).
+- CLI output uses ASCII-safe symbols for Windows terminals.
+
+### Fixed
+- Windows elevation relaunch now passes `--elevated` before the subcommand.
+- CLI list/url/open no longer fail due to missing methods or Unicode output.
+
 ## [1.0.0] - 2026-01-28
 ### Added
 - Initial public release: `v1.0.0`.
@@ -27,14 +40,13 @@ Semantic Versioning.
 - `devhost install` (Python) plus `install.py` wrapper for a single entrypoint.
 - Windows Caddy install/start/stop helpers in the Python CLI.
 - Router metrics endpoints (`/metrics`, `/routes`) and request logging controls.
-- Legacy bash CLI preserved as `devhost.sh` during migration.
 
 ### Changed
 - `devhost` now generates Caddyfiles and manages hosts entries from Python.
 - README updated for the Python CLI and installer usage.
 
 ### Removed
-- Legacy installers and shims (`install.sh`, `setup-macos.sh`, `setup-windows.ps1`, `devhost.ps1`, `devhost.sh`).
+- Legacy installers and shims (`install.sh`, `setup-macos.sh`, `setup-windows.ps1`, `devhost.sh`).
 
 ### Notes
 - See `README.md` for setup and usage instructions.
