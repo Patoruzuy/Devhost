@@ -61,7 +61,7 @@ PY
       _arguments '*:option:(--json)'
       ;;
     install)
-      _arguments '1:option:(--macos --windows --linux --caddy)'
+      _arguments '*:option:(--macos --windows --linux --caddy --yes --dry-run --start-dns --install-completions --domain --uvicorn --user --clean)'
       ;;
     doctor)
       _arguments '*:option:(--windows)'

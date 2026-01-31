@@ -1304,6 +1304,14 @@ def main():
     install_parser.add_argument("--macos", action="store_true")
     install_parser.add_argument("--linux", action="store_true")
     install_parser.add_argument("--caddy", action="store_true")
+    install_parser.add_argument("--yes", "-y", action="store_true")
+    install_parser.add_argument("--dry-run", action="store_true")
+    install_parser.add_argument("--start-dns", action="store_true")
+    install_parser.add_argument("--install-completions", action="store_true")
+    install_parser.add_argument("--domain")
+    install_parser.add_argument("--uvicorn")
+    install_parser.add_argument("--user")
+    install_parser.add_argument("--clean", action="store_true")
     install_parser.add_argument("rest", nargs=argparse.REMAINDER)
     
     args = parser.parse_args()
@@ -1395,15 +1403,14 @@ def main():
         elif args.command == "status":
             success = cli.router.status(args.json)
         elif args.command == "install":
-            if args.windows or IS_WINDOWS:
-                success = install_windows(args.caddy)
-            elif args.macos or IS_MACOS:
-                success = install_macos(args.rest)
-            elif args.linux or IS_LINUX:
-                success = install_linux(args.rest)
-            else:
-                msg_error("Unsupported platform for install.")
+            install_script = SCRIPT_DIR / "install.py"
+            if not install_script.exists():
+                msg_error("install.py not found.")
                 success = False
+            else:
+                cmd = [sys.executable, str(install_script)] + sys.argv[2:]
+                result = subprocess.run(cmd, check=False)
+                success = result.returncode == 0
         else:
             parser.print_help()
             return 1

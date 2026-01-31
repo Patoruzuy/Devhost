@@ -59,7 +59,7 @@ PY
             return 0
             ;;
         install)
-            COMPREPLY=( $(compgen -W "--macos --windows --linux --caddy" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--macos --windows --linux --caddy --yes --dry-run --start-dns --install-completions --domain --uvicorn --user --clean" -- "$cur") )
             return 0
             ;;
     esac

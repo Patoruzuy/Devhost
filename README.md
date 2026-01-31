@@ -29,7 +29,7 @@ Devhost allows you to map subdomains of a base domain (default: `localhost`, e.g
 
 ```bash
 git clone https://github.com/Patoruzuy/devhost.git
-./install.sh
+python install.py --linux
 devhost add hello 3000
 devhost list
 devhost remove hello
@@ -43,6 +43,18 @@ Cross-platform installer (uses the Python CLI):
 
 ```bash
 python install.py --linux
+```
+
+macOS example:
+
+```bash
+python install.py --macos --yes --start-dns --install-completions
+```
+
+Windows example (PowerShell):
+
+```powershell
+python .\install.py --windows --caddy
 ```
 
 To change the base domain (for example, `hello.flask`), set it once and re-run your installer to update DNS/resolvers:
