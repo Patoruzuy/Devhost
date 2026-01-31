@@ -130,7 +130,7 @@ function Add-Mapping($args) {
   if (-not $target) { Write-Host 'Port must be a number or host:port'; return }
   if ($scheme) {
     if ($target -match '^https?://') { Write-Host 'Target already includes a scheme'; return }
-    $target = "$scheme://$target"
+    $target = "${scheme}://$target"
   }
   $cfg = Load-Config
   $cfg | Add-Member -NotePropertyName $name -NotePropertyValue $target -Force
@@ -161,7 +161,7 @@ function Url-ForName($name) {
   if (-not $value) { Write-Host "No mapping found for $name.localhost"; return $null }
   $norm = Normalize-Target $value
   $scheme = $norm.scheme
-  return "$scheme://$name.localhost"
+  return "${scheme}://$name.localhost"
 }
 
 function Open-Url($name) {
