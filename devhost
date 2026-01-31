@@ -90,6 +90,18 @@ normalize_target() {
     echo "${scheme} ${host} ${port}"
 }
 
+get_dev_scheme() {
+    value=$1
+    if [[ "$value" =~ ^https:// ]]; then
+        echo "https"
+    elif [[ "$value" =~ ^http:// ]]; then
+        echo "http"
+    else
+        # default dev URL scheme
+        echo "https"
+    fi
+}
+
 open_in_browser() {
     url=$1
     if command -v xdg-open >/dev/null 2>&1; then
@@ -253,7 +265,11 @@ generate_caddyfile() {
         if [[ $mapcount -gt 0 ]]; then
             echo "" >> "$CADDYFILE"
             echo "# Direct mappings" >> "$CADDYFILE"
-            echo "$json" | jq -r 'to_entries[] | "\(.key).localhost {\n    reverse_proxy \(.value | tostring | if test(\"^https?://\") then . elif test(\":\") then . else \"localhost:\" + . end)\n    tls internal\n}\n"' >> "$CADDYFILE"
+            echo "$json" | jq -r 'to_entries[] | 
+                (if (.value|tostring|test("^http://")) then "http://"+.key+".localhost" else .key+".localhost" end) as $site
+                | $site + " {\n    reverse_proxy " + (if (.value|tostring|test("^https?://")) then (.value|tostring) elif (.value|tostring|test(":")) then (.value|tostring) else "localhost:" + (.value|tostring) end) + "\n" 
+                + (if (.value|tostring|test("^http://")) then "" else "    tls internal\n" end)
+                + "}\n"' >> "$CADDYFILE"
         fi
     else
         # fallback: use python to render mappings
@@ -268,7 +284,11 @@ try:
 except Exception:
     data={}
 for k,v in data.items():
-    print(f"{k}.localhost {{")
+    target = str(v)
+    if target.startswith("http://"):
+        print(f"http://{k}.localhost {{")
+    else:
+        print(f"{k}.localhost {{")
     target = str(v)
     if target.startswith("http://") or target.startswith("https://"):
         print(f"    reverse_proxy {target}")
@@ -276,7 +296,8 @@ for k,v in data.items():
         print(f"    reverse_proxy {target}")
     else:
         print(f"    reverse_proxy localhost:{target}")
-    print("    tls internal")
+    if not target.startswith("http://"):
+        print("    tls internal")
     print("}")
 PY
     fi
@@ -316,7 +337,11 @@ print_caddyfile() {
         if [[ $mapcount -gt 0 ]]; then
             echo ""
             echo "# Direct mappings"
-            echo "$json" | jq -r 'to_entries[] | "\(.key).localhost {\n    reverse_proxy \(.value | tostring | if test(\"^https?://\") then . elif test(\":\") then . else \"localhost:\" + . end)\n    tls internal\n}\n"'
+            echo "$json" | jq -r 'to_entries[] | 
+                (if (.value|tostring|test("^http://")) then "http://"+.key+".localhost" else .key+".localhost" end) as $site
+                | $site + " {\n    reverse_proxy " + (if (.value|tostring|test("^https?://")) then (.value|tostring) elif (.value|tostring|test(":")) then (.value|tostring) else "localhost:" + (.value|tostring) end) + "\n" 
+                + (if (.value|tostring|test("^http://")) then "" else "    tls internal\n" end)
+                + "}\n"'
         fi
     else
         if [ -z "$PYTHON_BIN" ]; then
@@ -330,7 +355,11 @@ try:
 except Exception:
     data={}
 for k,v in data.items():
-    print(f"{k}.localhost {{")
+    target = str(v)
+    if target.startswith("http://"):
+        print(f"http://{k}.localhost {{")
+    else:
+        print(f"{k}.localhost {{")
     target = str(v)
     if target.startswith("http://") or target.startswith("https://"):
         print(f"    reverse_proxy {target}")
@@ -338,7 +367,8 @@ for k,v in data.items():
         print(f"    reverse_proxy {target}")
     else:
         print(f"    reverse_proxy localhost:{target}")
-    print("    tls internal")
+    if not target.startswith("http://"):
+        print("    tls internal")
     print("}")
 PY
     fi
@@ -495,8 +525,7 @@ url() {
         echo "No mapping found for ${name}.localhost"
         return 1
     fi
-    normalized=$(normalize_target "$target" || true)
-    scheme=$(echo "$normalized" | awk '{print $1}')
+    scheme=$(get_dev_scheme "$target")
     echo "${scheme}://${name}.localhost"
     # Optional: open when Ctrl+O is pressed (interactive only)
     if [ -t 0 ]; then
@@ -522,8 +551,7 @@ open_cmd() {
         echo "No mapping found for ${name}.localhost"
         return 1
     fi
-    normalized=$(normalize_target "$target" || true)
-    scheme=$(echo "$normalized" | awk '{print $1}')
+    scheme=$(get_dev_scheme "$target")
     open_in_browser "${scheme}://${name}.localhost"
 }
 
