@@ -5,7 +5,7 @@
 
 **Secure, flexible local domain routing for developers.**
 
-Devhost allows you to map subdomains of a base domain (default: `localhost`, e.g. `myapp.localhost`) to local app ports, with automatic HTTPS and wildcard routing via Caddy and a Python backend.
+Devhost allows you to map subdomains of a base domain (default: `localhost`, e.g. `myapp.localhost`) to local app ports, with optional HTTPS and wildcard routing via Caddy and a Python backend.
 
 ## Features
 
@@ -112,6 +112,7 @@ Quick Commands
 - `devhost hosts sync` — re-apply hosts entries for all mappings on Windows (admin).
 - `devhost hosts clear` — remove all devhost entries from the Windows hosts file (admin).
 - `devhost caddy start|stop|restart|status` — manage Caddy on Windows.
+- `devhost fix-http` — convert all `https://` mappings to `http://` and regenerate Caddyfile.
 
 
 ## How It Works
@@ -190,6 +191,7 @@ Troubleshooting
 - Router health: `curl http://127.0.0.1:5555/health` should return `{ "status": "ok" }`.
 - If DNS/resolver issues on Linux, check `systemd-resolved` and `/etc/resolv.conf` for unintended changes.
 - Ensure Caddy is running if you depend on system TLS (check `systemctl status caddy`).
+- If your browser keeps forcing HTTPS after switching a mapping to HTTP, clear HSTS for the domain or change the base domain (e.g. `devhost domain devhost2`).
 
 Platform notes
 
