@@ -553,9 +553,13 @@ def windows_install(domain: str, args) -> int:
 
     msg_info("Next steps:")
     print("1) Start both Caddy + router:")
-    print("   devhost start")
+    print("   python .\\devhost start")
+    print("   # or")
+    print("   .\\devhost.ps1 start")
     print("2) Add a mapping:")
-    print("   devhost add hello 8000")
+    print("   python .\\devhost add hello 8000")
+    print("   # or")
+    print("   .\\devhost.ps1 add hello 8000")
     return 0
 
 

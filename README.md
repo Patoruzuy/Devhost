@@ -240,6 +240,13 @@ To clean and reinstall:
 python .\install.py --windows --clean
 ```
 
+If you want a shortcut in PowerShell without typing `python`, use:
+
+```powershell
+.\devhost.ps1 add hello 8000
+.\devhost.ps1 start
+```
+
 Note: the router requires a Host header. Don’t browse `http://127.0.0.1:5555` directly — use `devhost open <name>` or:
 
 ```powershell

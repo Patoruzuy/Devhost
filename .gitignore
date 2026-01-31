@@ -1,4 +1,5 @@
 *.ps1
+!devhost.ps1
 .devhost/
 devhost.json
 caddy/Caddyfile
