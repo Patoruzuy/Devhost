@@ -61,7 +61,7 @@ PY
       _arguments '*:option:(--json)'
       ;;
     install)
-      _arguments '1:option:(--macos --windows)'
+      _arguments '1:option:(--macos --windows --linux --caddy)'
       ;;
     doctor)
       _arguments '*:option:(--windows)'

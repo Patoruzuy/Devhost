@@ -1,963 +1,1424 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
+"""
+Devhost CLI - Lightweight local development domain router
+Unified cross-platform command-line interface
+"""
 
-SCRIPT_PATH="${BASH_SOURCE[0]}"
-if command -v readlink >/dev/null 2>&1; then
-    SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH" 2>/dev/null || echo "$SCRIPT_PATH")"
-fi
-ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-CONFIG="$ROOT_DIR/devhost.json"
-CADDYFILE="$ROOT_DIR/caddy/Caddyfile"
-DOMAIN_FILE="$ROOT_DIR/.devhost/domain"
-PYTHON_BIN=""
-if command -v python3 &> /dev/null; then
-    PYTHON_BIN="python3"
-elif command -v python &> /dev/null; then
-    PYTHON_BIN="python"
-fi
-
-load_json() {
-    if [[ ! -f "$CONFIG" ]]; then
-        echo "{}" > "$CONFIG"
-    fi
-    cat "$CONFIG"
-}
-
-save_json() {
-    tmpfile="$(mktemp "${CONFIG}.tmp.XXXXXX")" || return 1
-    printf '%s' "$1" > "$tmpfile"
-    mv "$tmpfile" "$CONFIG"
-}
-
-first_mapping_name() {
-    if command -v jq &> /dev/null; then
-        jq -r 'keys[0] // empty' "$CONFIG"
-    elif [ -n "$PYTHON_BIN" ]; then
-        "$PYTHON_BIN" - "$CONFIG" <<'PY'
-import json,sys
-try:
-    data=json.load(open(sys.argv[1]))
-    keys=sorted(data.keys())
-    print(keys[0] if keys else "")
-except Exception:
-    print("")
-PY
-    else
-        echo ""
-    fi
-}
-
-get_port_for_name() {
-    name=$1
-    if command -v jq &> /dev/null; then
-        jq -r --arg k "$name" '.[$k] // empty' "$CONFIG"
-    elif [ -n "$PYTHON_BIN" ]; then
-        "$PYTHON_BIN" - "$CONFIG" "$name" <<'PY'
-import json,sys
-try:
-    data=json.load(open(sys.argv[1]))
-    print(data.get(sys.argv[2], ""))
-except Exception:
-    print("")
-PY
-    else
-        echo ""
-    fi
-}
-
-
-
-normalize_target() {
-    value=$1
-    scheme="http"
-    host="127.0.0.1"
-    port=""
-    rest="$value"
-
-    if [[ "$rest" =~ ^https?:// ]]; then
-        scheme="${rest%%://*}"
-        rest="${rest#*://}"
-        rest="${rest%%/*}"
-    fi
-
-    if [[ "$rest" == *":"* ]]; then
-        host="${rest%:*}"
-        port="${rest##*:}"
-    else
-        port="$rest"
-    fi
-
-    if [ -z "$host" ] || [ -z "$port" ]; then
-        echo ""
-        return 1
-    fi
-    echo "${scheme} ${host} ${port}"
-}
-
-get_domain() {
-    if [ -n "${DEVHOST_DOMAIN:-}" ]; then
-        echo "$DEVHOST_DOMAIN" | tr -d ' \t\r\n'
-        return 0
-    fi
-    if [ -f "$DOMAIN_FILE" ]; then
-        tr -d ' \t\r\n' < "$DOMAIN_FILE"
-        return 0
-    fi
-    echo "localhost"
-}
-
-set_domain() {
-    new_domain=$1
-    if [ -z "$new_domain" ]; then
-        echo "Usage: devhost domain <base-domain>"
-        return 1
-    fi
-    if echo "$new_domain" | grep -qE '^https?://|/'; then
-        echo "Domain must be a host name only (no scheme or path)."
-        return 1
-    fi
-    mkdir -p "$(dirname "$DOMAIN_FILE")"
-    echo "$new_domain" > "$DOMAIN_FILE"
-    echo "Domain set to $new_domain"
-    generate_caddyfile
-}
-
-get_dev_scheme() {
-    value=$1
-    if [[ "$value" =~ ^https:// ]]; then
-        echo "https"
-    elif [[ "$value" =~ ^http:// ]]; then
-        echo "http"
-    else
-        # default dev URL scheme
-        echo "http"
-    fi
-}
-
-validate_name() {
-    name=$1
-    if [ -z "$name" ]; then
-        echo "Name is required."
-        return 1
-    fi
-    if [ ${#name} -gt 63 ]; then
-        echo "Name too long (max 63 chars)."
-        return 1
-    fi
-    if ! echo "$name" | grep -qE '^[A-Za-z0-9-]+$'; then
-        echo "Invalid name. Use only letters, numbers, and hyphens."
-        return 1
-    fi
-    return 0
-}
-
-validate_port_range() {
-    port=$1
-    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
-        return 1
-    fi
-    if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-        return 1
-    fi
-    return 0
-}
-
-open_in_browser() {
-    url=$1
-    if command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "$url" >/dev/null 2>&1 &
-    elif command -v open >/dev/null 2>&1; then
-        open "$url" >/dev/null 2>&1 &
-    elif command -v powershell.exe >/dev/null 2>&1; then
-        powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1
-    elif [ -n "$PYTHON_BIN" ]; then
-        "$PYTHON_BIN" - <<PY >/dev/null 2>&1
+import argparse
+import json
+import os
+import platform
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
 import webbrowser
-webbrowser.open("$url")
-PY
-    else
-        echo "No supported browser opener found (xdg-open/open/powershell/python)."
-        return 1
-    fi
-}
+from pathlib import Path
+from typing import Dict, Optional, Tuple, Any
+from urllib.parse import urlparse
 
-print_usage() {
-    cat <<'EOF'
-Usage: devhost <command> [args]
+# Version
+VERSION = "2.0.0"
 
-Commands:
-  add <name> <port|host:port>          Add a mapping
-  add <name> --http <port|host:port>   Force http for dev URL (default)
-  add <name> --https <port|host:port>  Force https for dev URL
-  remove <name>           Remove a mapping
-  list                    List mappings
-  list --json             List mappings as JSON
-  url [name]              Print URL; press Ctrl+O to open (interactive)
-  open [name]             Open URL in default browser
-  validate                Quick config/router/DNS checks
-  export caddy            Print generated Caddyfile
-  edit                    Open devhost.json in $EDITOR (fallback: vi)
-  resolve <name>          Show DNS resolution and port reachability
-  doctor                  Deeper diagnostics (dnsmasq/systemd-resolved/Caddy)
-  info                    Show this help
-  domain [name]           Show or set base domain (default: localhost)
-  hosts <sync|clear>      Windows-only hosts management (use devhost.ps1)
-  start|stop|status       Manage router process
-  install --macos [...]   Run macOS installer
-  install --windows       Run Windows installer
-EOF
-}
+# Platform detection
+IS_WINDOWS = platform.system() == "Windows"
+IS_MACOS = platform.system() == "Darwin"
+IS_LINUX = platform.system() == "Linux"
 
-edit_config() {
-    editor="${EDITOR:-}"
-    if [ -z "$editor" ]; then
-        if command -v nano >/dev/null 2>&1; then
-            editor="nano"
-        elif command -v vi >/dev/null 2>&1; then
-            editor="vi"
-        else
-            echo "No editor found. Set \$EDITOR or install nano/vi."
-            return 1
-        fi
-    fi
-    "$editor" "$CONFIG"
-}
-
-resolve_mapping() {
-    name=$1
-    if [ -z "$name" ]; then
-        echo "Usage: devhost resolve <name>"
-        return 1
-    fi
-    target=$(get_port_for_name "$name")
-    base_domain=$(get_domain)
-    if [ -z "$target" ]; then
-        echo "No mapping found for ${name}.${base_domain}"
-    else
-        normalized=$(normalize_target "$target" || true)
-        if [ -n "$normalized" ]; then
-            scheme=$(echo "$normalized" | awk '{print $1}')
-            host=$(echo "$normalized" | awk '{print $2}')
-            port=$(echo "$normalized" | awk '{print $3}')
-            echo "${name}.${base_domain} -> ${scheme}://${host}:${port}"
-        else
-            echo "${name}.${base_domain} -> ${target}"
-        fi
-    fi
-
-    if command -v dig >/dev/null 2>&1; then
-        ip=$(dig +short "${name}.${base_domain}" | head -n 1)
-        if [ -n "$ip" ]; then
-            echo "DNS: ${name}.${base_domain} -> ${ip}"
-        else
-            echo "DNS: unresolved"
-        fi
-    elif command -v getent >/dev/null 2>&1; then
-        ip=$(getent hosts "${name}.${base_domain}" | awk '{print $1}' | head -n 1)
-        if [ -n "$ip" ]; then
-            echo "DNS: ${name}.${base_domain} -> ${ip}"
-        else
-            echo "DNS: unresolved"
-        fi
-    else
-        echo "DNS: dig/getent not available"
-    fi
-
-    if [ -n "$target" ] && command -v nc >/dev/null 2>&1; then
-        normalized=$(normalize_target "$target" || true)
-        scheme=$(echo "$normalized" | awk '{print $1}')
-        host=$(echo "$normalized" | awk '{print $2}')
-        port=$(echo "$normalized" | awk '{print $3}')
-        if nc -z "$host" "$port" >/dev/null 2>&1; then
-            echo "Port: ${host}:${port} is open"
-        else
-            echo "Port: ${host}:${port} is not reachable"
-        fi
-    elif [ -n "$target" ]; then
-        echo "Port: nc not available to test reachability"
-    fi
-}
-
-doctor() {
-    echo "Devhost doctor"
-    echo "Root: $ROOT_DIR"
-    echo "Config: $CONFIG"
-    validate || true
-    base_domain=$(get_domain)
-
-    if [ "$base_domain" != "localhost" ]; then
-        if command -v dig >/dev/null 2>&1; then
-            if ! dig +short "hello.${base_domain}" | head -n 1 | grep -q '.'; then
-                echo "DNS: ${base_domain} is not resolving locally."
-                echo "Hint: add a hosts entry (e.g. 127.0.0.1 hello.${base_domain}) or configure a local DNS resolver."
-            fi
-        fi
-    fi
-
-    if command -v systemctl >/dev/null 2>&1; then
-        if systemctl is-active --quiet caddy; then
-            echo "Caddy: active"
-        elif systemctl status caddy >/dev/null 2>&1; then
-            echo "Caddy: installed but not active"
-        else
-            echo "Caddy: not found"
-        fi
-
-        if systemctl is-active --quiet dnsmasq; then
-            echo "dnsmasq: active"
-        elif systemctl status dnsmasq >/dev/null 2>&1; then
-            echo "dnsmasq: installed but not active"
-        else
-            echo "dnsmasq: not found"
-        fi
-
-        if systemctl is-active --quiet systemd-resolved; then
-            echo "systemd-resolved: active"
-            if command -v resolvectl >/dev/null 2>&1; then
-                resolvectl status 2>/dev/null | sed -n '1,60p'
-            fi
-        else
-            echo "systemd-resolved: not active"
-        fi
-    else
-        echo "systemctl not available; skipping service checks"
-    fi
-}
+# Paths
+SCRIPT_DIR = Path(__file__).parent.resolve()
+CONFIG_FILE = SCRIPT_DIR / "devhost.json"
+DOMAIN_FILE = SCRIPT_DIR / ".devhost" / "domain"
+ROUTER_DIR = SCRIPT_DIR / "router"
+CADDYFILE = SCRIPT_DIR / "caddy" / "Caddyfile"
+CADDY_TEMPLATE = SCRIPT_DIR / "caddy" / "Caddyfile.template"
+PID_FILE = SCRIPT_DIR / ".devhost" / "router.pid"
+LOG_FILE = Path("/tmp" if not IS_WINDOWS else os.environ.get("TEMP", ".")) / "devhost-router.log"
+ERR_FILE = Path("/tmp" if not IS_WINDOWS else os.environ.get("TEMP", ".")) / "devhost-router.err.log"
+BACKUP_DIR = SCRIPT_DIR / ".devhost" / "backups"
 
 
-generate_caddyfile() {
-    # generate project-local Caddyfile and a user-level Caddyfile if present
-    domain=$(get_domain)
-    echo "# Autogenerated Caddyfile" > "$CADDYFILE"
-    echo "*.${domain} {" >> "$CADDYFILE"
-    echo "    reverse_proxy localhost:5555" >> "$CADDYFILE"
-    echo "    tls internal" >> "$CADDYFILE"
-    echo "}" >> "$CADDYFILE"
+# ============================================================================
+# Utility Functions
+# ============================================================================
 
-    # Append explicit mappings from devhost.json
-    json=$(load_json)
-    if command -v jq &> /dev/null; then
-        mapcount=$(echo "$json" | jq 'length')
-        if [[ $mapcount -gt 0 ]]; then
-            echo "" >> "$CADDYFILE"
-            echo "# Direct mappings" >> "$CADDYFILE"
-            echo "$json" | jq -r --arg d "$domain" 'to_entries[] | 
-                (if (.value|tostring|test("^https://")) then .key+"."+$d else "http://"+.key+"."+$d end) as $site
-                | $site + " {\n    reverse_proxy " + (if (.value|tostring|test("^https?://")) then (.value|tostring) elif (.value|tostring|test(":")) then (.value|tostring) else "127.0.0.1:" + (.value|tostring) end) + "\n" 
-                + (if (.value|tostring|test("^https://")) then "    tls internal\n" else "" end)
-                + "}\n"' >> "$CADDYFILE"
-        fi
-    else
-        # fallback: use python to render mappings
-        if [ -z "$PYTHON_BIN" ]; then
-            echo "python3 (or python) is required to render mappings without jq."
-            return 1
-        fi
-        "$PYTHON_BIN" - "$CONFIG" "$domain" <<PY >> "$CADDYFILE"
-import json,sys
-try:
-    data=json.load(open(sys.argv[1]))
-except Exception:
-    data={}
-domain = sys.argv[2] if len(sys.argv) > 2 else "localhost"
-for k,v in data.items():
-    target = str(v)
-    if target.startswith("https://"):
-        print(f"{k}.{domain} {{")
+class Colors:
+    """ANSI colors for terminal output"""
+    RESET = "\033[0m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    GRAY = "\033[90m"
+    
+    @classmethod
+    def disable(cls):
+        """Disable colors for non-TTY or Windows without ANSI support"""
+        cls.RESET = cls.RED = cls.GREEN = cls.YELLOW = cls.BLUE = cls.GRAY = ""
+
+
+if not sys.stdout.isatty():
+    Colors.disable()
+elif IS_WINDOWS and not (
+    os.environ.get("ANSICON")
+    or os.environ.get("WT_SESSION")
+    or os.environ.get("ConEmuANSI") == "ON"
+):
+    Colors.disable()
+
+
+def msg_success(text: str):
+    """Print success message"""
+    print(f"{Colors.GREEN}✓{Colors.RESET} {text}")
+
+
+def msg_error(text: str):
+    """Print error message"""
+    print(f"{Colors.RED}✗{Colors.RESET} {text}", file=sys.stderr)
+
+
+def msg_warning(text: str):
+    """Print warning message"""
+    print(f"{Colors.YELLOW}⚠{Colors.RESET}  {text}")
+
+
+def msg_info(text: str):
+    """Print info message"""
+    print(f"{Colors.BLUE}→{Colors.RESET} {text}")
+
+
+def msg_step(current: int, total: int, text: str):
+    """Print step message"""
+    print(f"{Colors.GRAY}[{current}/{total}]{Colors.RESET} {text}")
+
+
+def is_admin() -> bool:
+    if not IS_WINDOWS:
+        return os.geteuid() == 0 if hasattr(os, "geteuid") else False
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _ps_quote(value: str) -> str:
+    return value.replace("`", "``").replace('"', '`"')
+
+
+def relaunch_as_admin(args: list[str]) -> None:
+    if not IS_WINDOWS:
+        return
+    python_exe = sys.executable
+    script = str(SCRIPT_DIR / "devhost")
+    launch_args = [script] + args + ["--elevated"]
+    quoted_args = ",".join(f'"{_ps_quote(a)}"' for a in launch_args)
+    ps_cmd = (
+        f'Start-Process -FilePath "{_ps_quote(python_exe)}" '
+        f'-ArgumentList @({quoted_args}) -Verb RunAs'
+    )
+    subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], check=False)
+
+
+def ensure_admin_if_needed(command: str, args: list[str], domain: str) -> None:
+    if not IS_WINDOWS or is_admin():
+        return
+    if "--elevated" in args:
+        return
+    if command == "domain" and args:
+        domain = args[0]
+    if domain == "localhost":
+        return
+    if command in {"add", "remove", "hosts", "domain"}:
+        msg_info("Re-launching as Administrator to update hosts entries...")
+        relaunch_as_admin([command] + args)
+        sys.exit(0)
+
+
+# ============================================================================
+# Configuration Management
+# ============================================================================
+
+class Config:
+    """Manages devhost.json configuration"""
+    
+    def __init__(self):
+        self.config_file = CONFIG_FILE
+        self.domain_file = DOMAIN_FILE
+        
+    def load(self) -> Dict:
+        """Load configuration from file"""
+        if not self.config_file.exists():
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+            self.config_file.write_text("{}", encoding="utf-8")
+            return {}
+        
+        try:
+            with open(self.config_file, 'r') as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+                return {}
+        except (json.JSONDecodeError, IOError) as e:
+            msg_error(f"Failed to load config: {e}")
+            return {}
+    
+    def save(self, data: Dict):
+        """Save configuration to file"""
+        try:
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.config_file.with_suffix(".tmp")
+            with open(tmp, 'w', encoding="utf-8") as f:
+                json.dump(data, f, indent=2, sort_keys=True)
+            tmp.replace(self.config_file)
+        except IOError as e:
+            msg_error(f"Failed to save config: {e}")
+            raise
+    
+    def get_domain(self) -> str:
+        """Get base domain from env or config"""
+        # Check environment variable first
+        domain = os.environ.get("DEVHOST_DOMAIN", "").strip()
+        if domain:
+            return domain
+        
+        # Check domain file
+        if self.domain_file.exists():
+            try:
+                domain = self.domain_file.read_text().strip()
+                if domain:
+                    return domain
+            except IOError:
+                pass
+        
+        return "localhost"
+    
+    def set_domain(self, domain: str):
+        """Set base domain"""
+        if not domain:
+            msg_error("Domain cannot be empty")
+            return False
+        
+        # Validate domain
+        if "/" in domain or domain.startswith("http"):
+            msg_error("Domain must be a hostname only (no scheme or path)")
+            return False
+        
+        try:
+            self.domain_file.parent.mkdir(parents=True, exist_ok=True)
+            self.domain_file.write_text(domain)
+            msg_success(f"Domain set to: {domain}")
+            generate_caddyfile(self.load())
+            if IS_WINDOWS and domain != "localhost":
+                if is_admin():
+                    hosts_sync()
+                else:
+                    msg_warning("Run PowerShell as Administrator to update hosts entries for existing mappings.")
+            return True
+        except IOError as e:
+            msg_error(f"Failed to set domain: {e}")
+            return False
+
+
+# ============================================================================
+# Target Parsing
+# ============================================================================
+
+def validate_name(name: str) -> bool:
+    """Validate mapping name"""
+    if not name:
+        msg_error("Name cannot be empty")
+        return False
+    
+    # Only alphanumeric and hyphens
+    if not all(c.isalnum() or c == '-' for c in name):
+        msg_error("Name must contain only letters, numbers, and hyphens")
+        return False
+    
+    # Max length
+    if len(name) > 63:
+        msg_error("Name too long (max 63 characters)")
+        return False
+    
+    return True
+
+
+def validate_port(port: int) -> bool:
+    """Validate port number"""
+    if port < 1 or port > 65535:
+        msg_error("Port must be between 1 and 65535")
+        return False
+    
+    if port < 1024:
+        msg_warning(f"Port {port} requires elevated privileges")
+    
+    return True
+
+
+def parse_target(value: str) -> Optional[Tuple[str, str, int]]:
+    """
+    Parse target value into (scheme, host, port)
+    Accepts: 8000, localhost:8000, http://localhost:8000, https://example.com:443
+    """
+    if not value:
+        return None
+    
+    # Just a port number
+    if value.isdigit():
+        port = int(value)
+        if not validate_port(port):
+            return None
+        return ("http", "127.0.0.1", port)
+    
+    # Full URL
+    if value.startswith("http://") or value.startswith("https://"):
+        try:
+            parsed = urlparse(value)
+            if not parsed.hostname or not parsed.port:
+                msg_error("Invalid URL: must include host and port")
+                return None
+            return (parsed.scheme, parsed.hostname, parsed.port)
+        except Exception as e:
+            msg_error(f"Invalid URL: {e}")
+            return None
+    
+    # host:port format
+    if ":" in value:
+        parts = value.rsplit(":", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            host, port_str = parts
+            port = int(port_str)
+            if not validate_port(port):
+                return None
+            return ("http", host, port)
+    
+    msg_error(f"Invalid target format: {value}")
+    msg_info("Use: <port> or <host>:<port> or http(s)://<host>:<port>")
+    return None
+
+
+def get_dev_scheme(value: Any) -> str:
+    if isinstance(value, str):
+        if value.startswith("https://"):
+            return "https"
+        if value.startswith("http://"):
+            return "http"
+    return "http"
+
+
+def render_caddyfile(routes: Dict[str, Any]) -> str:
+    domain = Config().get_domain()
+    lines = [
+        "# Autogenerated Caddyfile",
+        f"*.{domain} {{",
+        "    reverse_proxy localhost:5555",
+        "    tls internal",
+        "}",
+    ]
+
+    if routes:
+        lines.append("")
+        lines.append("# Direct mappings")
+        for name in sorted(routes.keys()):
+            value = routes[name]
+            value_str = str(value)
+            site = f"{name}.{domain}" if value_str.startswith("https://") else f"http://{name}.{domain}"
+            if value_str.startswith("http://") or value_str.startswith("https://"):
+                target = value_str
+            elif ":" in value_str:
+                target = value_str
+            else:
+                target = f"127.0.0.1:{value_str}"
+            lines.append(f"{site} {{")
+            lines.append(f"    reverse_proxy {target}")
+            if value_str.startswith("https://"):
+                lines.append("    tls internal")
+            lines.append("}")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def generate_caddyfile(routes: Optional[Dict[str, Any]] = None) -> None:
+    routes = routes if routes is not None else Config().load()
+    CADDYFILE.parent.mkdir(parents=True, exist_ok=True)
+    CADDYFILE.write_text(render_caddyfile(routes), encoding="utf-8")
+
+    user_caddy = Path.home() / ".config" / "caddy" / "Caddyfile"
+    if user_caddy.parent.exists():
+        user_caddy.write_text(CADDYFILE.read_text(encoding="utf-8"), encoding="utf-8")
+
+    if not IS_WINDOWS:
+        system_caddy = Path("/etc/caddy/Caddyfile")
+        if system_caddy.exists() and shutil.which("sudo"):
+            subprocess.run(["sudo", "cp", str(CADDYFILE), str(system_caddy)], check=False)
+        if shutil.which("systemctl"):
+            subprocess.run(["sudo", "systemctl", "reload", "caddy"], check=False)
+
+
+def print_caddyfile(routes: Optional[Dict[str, Any]] = None) -> None:
+    routes = routes if routes is not None else Config().load()
+    print(render_caddyfile(routes))
+
+
+def edit_config() -> None:
+    editor = os.environ.get("EDITOR")
+    if not editor:
+        if IS_WINDOWS:
+            editor = "notepad.exe"
+        elif shutil.which("nano"):
+            editor = "nano"
+        else:
+            editor = "vi"
+    subprocess.run([editor, str(CONFIG_FILE)], check=False)
+
+
+# ============================================================================
+# Port Checking
+# ============================================================================
+
+def check_port_open(host: str, port: int, timeout: float = 1.0) -> bool:
+    """Check if a port is open"""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0
+    except socket.error:
+        return False
+
+
+def check_router_health() -> bool:
+    """Check if router is responding"""
+    try:
+        import urllib.request
+        req = urllib.request.Request("http://127.0.0.1:5555/health")
+        with urllib.request.urlopen(req, timeout=2) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def open_in_browser(url: str) -> bool:
+    try:
+        return webbrowser.open(url)
+    except Exception:
+        return False
+
+
+def read_single_key() -> Optional[str]:
+    if not sys.stdin.isatty():
+        return None
+    if IS_WINDOWS:
+        try:
+            import msvcrt
+
+            ch = msvcrt.getch()
+            try:
+                return ch.decode("utf-8")
+            except Exception:
+                return None
+        except Exception:
+            return None
     else:
-        print(f"http://{k}.{domain} {{")
-    target = str(v)
-    if target.startswith("http://") or target.startswith("https://"):
-        print(f"    reverse_proxy {target}")
-    elif ":" in target:
-        print(f"    reverse_proxy {target}")
+        try:
+            import termios
+            import tty
+
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                return sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        except Exception:
+            return None
+
+
+def hosts_path() -> Path:
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    return Path(system_root) / "System32" / "drivers" / "etc" / "hosts"
+
+
+def hosts_add(hostname: str) -> None:
+    if not hostname:
+        return
+    path = hosts_path()
+    if not path.exists():
+        return
+    content = path.read_text(encoding="ascii", errors="ignore")
+    if any(
+        line.strip().startswith("127.0.0.1") and hostname in line and "devhost" in line
+        for line in content.splitlines()
+    ):
+        return
+    with path.open("a", encoding="ascii") as fh:
+        fh.write(f"\n127.0.0.1 {hostname} # devhost")
+
+
+def hosts_remove(hostname: str) -> None:
+    if not hostname:
+        return
+    path = hosts_path()
+    if not path.exists():
+        return
+    lines = path.read_text(encoding="ascii", errors="ignore").splitlines()
+    filtered = [line for line in lines if not (hostname in line and "devhost" in line)]
+    path.write_text("\n".join(filtered) + ("\n" if filtered else ""), encoding="ascii")
+
+
+def hosts_sync() -> None:
+    domain = Config().get_domain()
+    if domain == "localhost":
+        return
+    cfg = Config().load()
+    for name in cfg.keys():
+        hosts_add(f"{name}.{domain}")
+    msg_success("Hosts entries synced.")
+
+
+def hosts_clear() -> None:
+    path = hosts_path()
+    if not path.exists():
+        msg_warning("Hosts file not found.")
+        return
+    lines = path.read_text(encoding="ascii", errors="ignore").splitlines()
+    filtered = [line for line in lines if "devhost" not in line]
+    path.write_text("\n".join(filtered) + ("\n" if filtered else ""), encoding="ascii")
+    msg_success("Hosts entries cleared.")
+
+
+def find_caddy_exe() -> Optional[str]:
+    cmd = shutil.which("caddy")
+    if cmd:
+        return cmd
+    if IS_WINDOWS:
+        base = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages"
+        if base.exists():
+            for path in base.glob("CaddyServer.Caddy*\\caddy.exe"):
+                return str(path)
+    return None
+
+
+def install_caddy_windows() -> bool:
+    if find_caddy_exe():
+        msg_success("Caddy already installed.")
+        return True
+    if not shutil.which("winget"):
+        msg_error("winget not found. Install Caddy manually: https://caddyserver.com/docs/install")
+        return False
+    msg_step(1, 1, "Installing Caddy via winget...")
+    result = subprocess.run(["winget", "install", "-e", "--id", "CaddyServer.Caddy"], check=False)
+    if result.returncode != 0:
+        subprocess.run(["winget", "install", "-e", "--id", "Caddy.Caddy"], check=False)
+    if find_caddy_exe():
+        msg_success("Caddy installed.")
+        return True
+    msg_warning("Caddy install attempted but binary not found on PATH yet.")
+    return False
+
+
+def port80_owner_windows() -> Tuple[Optional[str], Optional[int]]:
+    if not IS_WINDOWS:
+        return (None, None)
+    ps = (
+        "Get-NetTCPConnection -LocalPort 80 -ErrorAction SilentlyContinue "
+        "| Select-Object -First 1 | ConvertTo-Json"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if not result.stdout.strip():
+        return (None, None)
+    try:
+        data = json.loads(result.stdout)
+        pid = int(data.get("OwningProcess"))
+    except Exception:
+        return (None, None)
+    name = None
+    ps_name = f"(Get-Process -Id {pid} -ErrorAction SilentlyContinue).ProcessName"
+    result2 = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps_name],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result2.stdout.strip():
+        name = result2.stdout.strip()
+    return (name, pid)
+
+
+def caddy_start() -> None:
+    exe = find_caddy_exe()
+    if not exe:
+        msg_error("Caddy not found. Install with: devhost install --caddy")
+        return
+    existing = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", "Get-Process caddy -ErrorAction SilentlyContinue"],
+        capture_output=True,
+        text=True,
+    )
+    if existing.stdout.strip():
+        msg_info("Caddy already running")
+        return
+    name, pid = port80_owner_windows()
+    if name and name.lower() != "caddy":
+        msg_error(f"Port 80 is already in use by {name} (pid {pid}).")
+        if name.lower() == "wslrelay":
+            msg_warning("Hint: run 'wsl --shutdown' to free port 80.")
+        msg_warning("Stop that process or free port 80, then retry.")
+        return
+    subprocess.run([exe, "start", "--config", str(CADDYFILE)], check=False)
+    msg_success(f"Caddy starting with config: {CADDYFILE}")
+
+
+def caddy_stop() -> None:
+    exe = find_caddy_exe()
+    if not exe:
+        msg_error("Caddy not found.")
+        return
+    subprocess.run([exe, "stop"], check=False)
+    msg_success("Caddy stop requested")
+
+
+def caddy_restart() -> None:
+    caddy_stop()
+    time.sleep(1)
+    caddy_start()
+
+
+def caddy_status() -> None:
+    if not IS_WINDOWS:
+        msg_info("Caddy status is available on Windows via `devhost caddy status`.")
+        return
+    existing = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", "Get-Process caddy -ErrorAction SilentlyContinue"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if existing.stdout.strip():
+        msg_success("Caddy: running")
     else:
-        print(f"    reverse_proxy 127.0.0.1:{target}")
-    if target.startswith("https://"):
-        print("    tls internal")
-    print("}")
-PY
-    fi
+        msg_warning("Caddy: not running")
 
-    # Also update user Caddyfile if present to support system-wide caddy configs
-    USER_CADDY="$HOME/.config/caddy/Caddyfile"
-    if [[ -d "$(dirname "$USER_CADDY")" ]]; then
-        cp "$CADDYFILE" "$USER_CADDY"
-    fi
 
-    # Update system Caddyfile if present (requires sudo)
-    SYSTEM_CADDY="/etc/caddy/Caddyfile"
-    if [ -f "$SYSTEM_CADDY" ]; then
-        if command -v sudo >/dev/null 2>&1; then
-            sudo cp "$CADDYFILE" "$SYSTEM_CADDY" 2>/dev/null || true
-        else
-            echo "Note: /etc/caddy/Caddyfile exists but sudo is not available to update it."
-        fi
-    fi
-
-    # reload caddy if systemctl is available
-    if command -v systemctl &> /dev/null; then
-        sudo systemctl reload caddy || true
-    fi
-}
-
-print_caddyfile() {
-    echo "# Autogenerated Caddyfile"
-    domain=$(get_domain)
-    echo "*.${domain} {"
-    echo "    reverse_proxy localhost:5555"
-    echo "    tls internal"
-    echo "}"
-
-    json=$(load_json)
-    if command -v jq &> /dev/null; then
-        mapcount=$(echo "$json" | jq 'length')
-        if [[ $mapcount -gt 0 ]]; then
-            echo ""
-            echo "# Direct mappings"
-            echo "$json" | jq -r --arg d "$domain" 'to_entries[] | 
-                (if (.value|tostring|test("^https://")) then .key+"."+$d else "http://"+.key+"."+$d end) as $site
-                | $site + " {\n    reverse_proxy " + (if (.value|tostring|test("^https?://")) then (.value|tostring) elif (.value|tostring|test(":")) then (.value|tostring) else "127.0.0.1:" + (.value|tostring) end) + "\n" 
-                + (if (.value|tostring|test("^https://")) then "    tls internal\n" else "" end)
-                + "}\n"'
-        fi
-    else
-        if [ -z "$PYTHON_BIN" ]; then
-            echo "python3 (or python) is required to render mappings without jq."
-            return 1
-        fi
-        "$PYTHON_BIN" - "$CONFIG" "$domain" <<PY
-import json,sys
-try:
-    data=json.load(open(sys.argv[1]))
-except Exception:
-    data={}
-domain = sys.argv[2] if len(sys.argv) > 2 else "localhost"
-for k,v in data.items():
-    target = str(v)
-    if target.startswith("https://"):
-        print(f"{k}.{domain} {{")
+def doctor_windows(fix: bool = False) -> None:
+    print("Devhost doctor (Windows)")
+    exe = find_caddy_exe()
+    if exe:
+        msg_info(f"Caddy: {exe}")
     else:
-        print(f"http://{k}.{domain} {{")
-    target = str(v)
-    if target.startswith("http://") or target.startswith("https://"):
-        print(f"    reverse_proxy {target}")
-    elif ":" in target:
-        print(f"    reverse_proxy {target}")
+        msg_warning("Caddy: not found")
+    name, pid = port80_owner_windows()
+    if name:
+        msg_warning(f"Port 80: in use by {name} (pid {pid})")
     else:
-        print(f"    reverse_proxy 127.0.0.1:{target}")
-    if target.startswith("https://"):
-        print("    tls internal")
-    print("}")
-PY
-    fi
-}
+        msg_success("Port 80: free")
+    if check_router_health():
+        msg_success("Router: OK")
+    else:
+        msg_warning("Router: not responding")
 
-add() {
-    domain=$1
-    shift
-    scheme=""
-    target=""
+    domain = Config().get_domain()
+    if domain != "localhost":
+        path = hosts_path()
+        if path.exists():
+            content = path.read_text(encoding="ascii", errors="ignore")
+            missing = []
+            for name in Config().load().keys():
+                entry = f"{name}.{domain}"
+                if entry not in content:
+                    missing.append(entry)
+            if missing:
+                msg_warning(f"Hosts: missing entries for {', '.join(missing)}")
+            else:
+                msg_success("Hosts: OK")
+        else:
+            msg_warning("Hosts file not found.")
 
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --http) scheme="http"; shift ;;
-            --https) scheme="https"; shift ;;
-            *) target="$1"; shift ;;
-        esac
-    done
+    if fix:
+        if not is_admin():
+            msg_error("Fix requires Administrator privileges.")
+            return
+        if domain != "localhost":
+            hosts_sync()
+        if name and name.lower() == "wslrelay" and shutil.which("wsl"):
+            msg_info("Port 80 is held by wslrelay; shutting down WSL...")
+            subprocess.run(["wsl", "--shutdown"], check=False)
+        if exe:
+            subprocess.run([exe, "start", "--config", str(CADDYFILE)], check=False)
+            msg_success("Caddy: start requested")
+        else:
+            msg_warning("Caddy not found; run devhost install --caddy")
 
-    if ! validate_name "$domain"; then
-        return 1
-    fi
 
-    if [ -z "$target" ]; then
-        echo "Usage: devhost add <name> <port|host:port>"
-        return 1
-    fi
+# ============================================================================
+# Router Process Management
+# ============================================================================
 
-    if [ -n "$scheme" ]; then
-        if [[ "$target" =~ ^https?:// ]]; then
-            echo "Target already includes a scheme; do not combine with --http/--https"
-            return 1
-        fi
-        if [[ "$target" =~ ^[0-9]+$ ]]; then
-            target="127.0.0.1:${target}"
-        fi
-        target="${scheme}://${target}"
-    fi
+class Router:
+    """Manages router process lifecycle"""
+    
+    def __init__(self):
+        self.pid_file = PID_FILE
+        self.log_file = LOG_FILE
+        self.err_file = ERR_FILE
+        self.router_dir = ROUTER_DIR
+    
+    def find_python(self) -> Optional[Path]:
+        """Find Python executable, preferring venv"""
+        # Check for venv python
+        candidates = [
+            self.router_dir / "venv" / "bin" / "python",
+            self.router_dir / "venv" / "Scripts" / "python.exe",
+            self.router_dir / ".venv" / "bin" / "python",
+            self.router_dir / ".venv" / "Scripts" / "python.exe",
+            SCRIPT_DIR / ".venv" / "bin" / "python",
+            SCRIPT_DIR / ".venv" / "Scripts" / "python.exe",
+        ]
+        
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        
+        # Fallback to system python
+        return shutil.which("python3") or shutil.which("python")
+    
+    def is_running(self) -> Tuple[bool, Optional[int]]:
+        """Check if router is running, return (is_running, pid)"""
+        if not self.pid_file.exists():
+            # Fallback: check if router port is responding
+            if check_router_health():
+                return (True, None)
+            return (False, None)
+        
+        try:
+            pid = int(self.pid_file.read_text().strip())
+            
+            # Check if process is alive
+            try:
+                os.kill(pid, 0)  # Signal 0 just checks if process exists
+                return (True, pid)
+            except (OSError, ProcessLookupError):
+                # Stale PID file
+                self.pid_file.unlink(missing_ok=True)
+                return (False, None)
+        except (ValueError, IOError):
+            return (False, None)
+    
+    def start(self) -> bool:
+        """Start the router process"""
+        msg_step(1, 3, "Checking if router is already running...")
+        running, pid = self.is_running()
+        if running:
+            msg_warning(f"Router already running{f' (pid {pid})' if pid else ''}")
+            return True
 
-    json=$(load_json)
-    # validate target
-    if [[ "$target" =~ ^https?:// ]]; then
-        stripped="${target#*://}"
-        stripped="${stripped%%/*}"
-        if [[ "$stripped" == *":"* ]]; then
-            host_part="${stripped%:*}"
-            port_part="${stripped##*:}"
-            if [ -z "$host_part" ] || ! validate_port_range "$port_part"; then
-                echo "Port must be a number or host:port"
-                return 1
-            fi
-        else
-            if ! validate_port_range "$stripped"; then
-                echo "Port must be a number or host:port"
-                return 1
-            fi
-        fi
-    elif [[ "$target" == *":"* ]]; then
-        host_part="${target%:*}"
-        port_part="${target##*:}"
-        if [ -z "$host_part" ] || ! validate_port_range "$port_part"; then
-            echo "Port must be a number or host:port"
-            return 1
-        fi
-    else
-        if ! validate_port_range "$target"; then
-            echo "Port must be a number or host:port"
-            return 1
-        fi
-    fi
-    if command -v jq &> /dev/null; then
-        if [[ "$target" =~ ^https?:// ]]; then
-            new_json=$(echo "$json" | jq --arg k "$domain" --arg p "$target" '. + {($k): $p}')
-        elif [[ "$target" == *":"* ]]; then
-            new_json=$(echo "$json" | jq --arg k "$domain" --arg p "$target" '. + {($k): $p}')
-        else
-            new_json=$(echo "$json" | jq --arg k "$domain" --arg p "$target" '. + {($k): ($p|tonumber)}')
-        fi
-    else
-        if [ -z "$PYTHON_BIN" ]; then
-            echo "python3 (or python) is required to add mappings without jq."
-            return 1
-        fi
-        new_json=$("$PYTHON_BIN" - "$CONFIG" "$domain" "$target" <<PY
-import json,sys
-try:
-    data=json.load(open(sys.argv[1]))
-except Exception:
-    data={}
-value=sys.argv[3]
-try:
-    value=int(value)
-except Exception:
-    pass
-data[sys.argv[2]] = value
-print(json.dumps(data))
-PY
-)
-    fi
-    save_json "$new_json"
-    base_domain=$(get_domain)
-    echo "[+] Mapped $domain.${base_domain} to $target"
-    generate_caddyfile
-}
+        if IS_WINDOWS:
+            caddy_start()
+        
+        msg_step(2, 3, "Finding Python interpreter...")
+        python = self.find_python()
+        if not python:
+            msg_error("Python not found. Please install Python 3.8+")
+            return False
+        
+        msg_info(f"Using: {python}")
 
-remove() {
-    domain=$1
-    json=$(load_json)
-    if command -v jq &> /dev/null; then
-        new_json=$(echo "$json" | jq --arg k "$domain" 'del(.[$k])')
-    else
-        if [ -z "$PYTHON_BIN" ]; then
-            echo "python3 (or python) is required to remove mappings without jq."
-            return 1
-        fi
-        new_json=$("$PYTHON_BIN" - "$CONFIG" "$domain" <<PY
-import json,sys
-try:
-    data=json.load(open(sys.argv[1]))
-except Exception:
-    data={}
-data.pop(sys.argv[2], None)
-print(json.dumps(data))
-PY
-)
-    fi
-    save_json "$new_json"
-    base_domain=$(get_domain)
-    echo "[-] Removed mapping for $domain.${base_domain}"
-    generate_caddyfile
-}
+        if IS_WINDOWS:
+            venv_cfg = self.router_dir / "venv" / "pyvenv.cfg"
+            if venv_cfg.exists():
+                for line in venv_cfg.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    if line.startswith("home = "):
+                        home = line.replace("home = ", "").strip()
+                        if not home.startswith(tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ")):
+                            msg_error("Venv appears to be created by WSL. Recreate with scripts\\setup-windows.ps1")
+                            return False
+        
+        # Check if uvicorn is installed
+        result = subprocess.run(
+            [str(python), "-c", "import uvicorn"],
+            capture_output=True
+        )
+        if result.returncode != 0:
+            msg_warning("uvicorn not found in venv, installing dependencies...")
+            req_file = self.router_dir / "requirements.txt"
+            if req_file.exists():
+                subprocess.run([str(python), "-m", "pip", "install", "-q", "-r", str(req_file)])
+        
+        msg_step(3, 3, "Starting router...")
+        
+        # Ensure directories exist
+        self.pid_file.parent.mkdir(parents=True, exist_ok=True)
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        self.err_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Start router process
+        cmd = [
+            str(python), "-m", "uvicorn",
+            "app:app",
+            "--host", "127.0.0.1",
+            "--port", "5555",
+        ]
 
-list() {
-    if [ "${1:-}" = "--json" ]; then
-        if command -v jq &> /dev/null; then
-            load_json | jq
-        else
-            if [ -z "$PYTHON_BIN" ]; then
-                load_json
-                return 0
-            fi
-            "$PYTHON_BIN" - "$CONFIG" <<PY
-import json,sys
-try:
-    data=json.load(open(sys.argv[1]))
-except Exception:
-    data={}
-print(json.dumps(data, indent=2, sort_keys=True))
-PY
-        fi
+        creationflags = 0
+        if IS_WINDOWS and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+
+        with open(self.log_file, 'a', encoding="utf-8") as log, open(self.err_file, 'a', encoding="utf-8") as err:
+            process = subprocess.Popen(
+                cmd,
+                cwd=str(self.router_dir),
+                stdout=log,
+                stderr=err,
+                start_new_session=not IS_WINDOWS,
+                creationflags=creationflags
+            )
+        
+        # Save PID
+        self.pid_file.write_text(str(process.pid))
+        
+        # Wait a moment and check if it started
+        time.sleep(1)
+        if not self.is_running()[0]:
+            msg_error("Router failed to start")
+            msg_info(f"Check logs: {self.log_file}")
+            return False
+        
+        msg_success(f"Router started (pid {process.pid})")
+        msg_info(f"Logs: {self.log_file}")
+        msg_info(f"Errors: {self.err_file}")
+        return True
+    
+    def stop(self) -> bool:
+        """Stop the router process"""
+        running, pid = self.is_running()
+        if not running:
+            msg_info("Router is not running")
+            return True
+        
+        if pid:
+            try:
+                os.kill(pid, signal.SIGTERM if not IS_WINDOWS else signal.SIGBREAK)
+                msg_success(f"Sent stop signal to process {pid}")
+                
+                # Wait for process to stop
+                for _ in range(5):
+                    time.sleep(0.5)
+                    if not self.is_running()[0]:
+                        break
+                
+                # Force kill if still running
+                if self.is_running()[0]:
+                    os.kill(pid, signal.SIGKILL if not IS_WINDOWS else signal.SIGBREAK)
+                    msg_warning("Forced process termination")
+                
+                self.pid_file.unlink(missing_ok=True)
+                msg_success("Router stopped")
+                return True
+            except Exception as e:
+                msg_error(f"Failed to stop router: {e}")
+                return False
+        else:
+            msg_warning("Router running but PID unknown - cannot stop")
+            return False
+    
+    def status(self, json_output: bool = False) -> bool:
+        """Show router status"""
+        running, pid = self.is_running()
+        health = check_router_health()
+        
+        if json_output:
+            import json
+            print(json.dumps({
+                "running": running,
+                "pid": pid,
+                "health": "ok" if health else "not_responding"
+            }))
+            return running
+        
+        if running:
+            msg_success(f"Router running{f' (pid {pid})' if pid else ''}")
+            if health:
+                msg_success("Health check: OK")
+            else:
+                msg_error("Health check: not responding")
+        else:
+            msg_info("Router not running")
+        
+        return running
+
+
+# ============================================================================
+# CLI Commands
+# ============================================================================
+
+class DevhostCLI:
+    """Main CLI interface"""
+    
+    def __init__(self):
+        self.config = Config()
+        self.router = Router()
+    
+    def add(self, name: str, target: str, scheme: Optional[str] = None):
+        """Add a new mapping"""
+        msg_step(1, 4, "Validating inputs...")
+        
+        if not validate_name(name):
+            return False
+        if not target:
+            msg_error("Usage: devhost add <name> <port|host:port>")
+            return False
+
+        if scheme and (target.startswith("http://") or target.startswith("https://")):
+            msg_error("Target already includes a scheme; do not combine with --http/--https")
+            return False
+
+        raw_target = target
+        if scheme:
+            if raw_target.isdigit():
+                raw_target = f"127.0.0.1:{raw_target}"
+            raw_target = f"{scheme}://{raw_target}"
+
+        parsed = parse_target(raw_target)
+        if not parsed:
+            return False
+
+        target_scheme, host, port = parsed
+
+        msg_step(2, 4, "Adding mapping to configuration...")
+        
+        routes = self.config.load()
+        
+        # Store as port number if simple localhost mapping, else keep raw target
+        if (not scheme) and raw_target.isdigit():
+            routes[name] = port
+        else:
+            routes[name] = raw_target
+        
+        self.config.save(routes)
+        generate_caddyfile(routes)
+
+        if IS_WINDOWS:
+            domain = self.config.get_domain()
+            if domain != "localhost":
+                if is_admin():
+                    hosts_add(f"{name}.{domain}")
+                else:
+                    msg_warning("Hosts update skipped (not running as Administrator).")
+        
+        domain = self.config.get_domain()
+        msg_success(f"Added mapping: {name}.{domain} → {target_scheme}://{host}:{port}")
+        
+        msg_step(3, 4, "Checking if service is reachable...")
+        if check_port_open(host, port):
+            msg_success(f"Service is running on {host}:{port}")
+        else:
+            msg_warning(f"Service not responding on {host}:{port}")
+            msg_info("Make sure your application is running on this port")
+        
+        msg_step(4, 4, "Checking router status...")
+        if not self.router.is_running()[0]:
+            msg_warning("Router is not running")
+            msg_info("Start it with: devhost start")
+        else:
+            msg_success("Router is running")
+        
+        print()
+        msg_info(f"Access your app at: {target_scheme}://{name}.{domain}")
+        return True
+
+
+def install_windows(install_caddy: bool) -> bool:
+    msg_step(1, 3, "Setting up router venv...")
+    python = shutil.which("py") or sys.executable
+    venv_dir = ROUTER_DIR / "venv"
+    venv_cfg = venv_dir / "pyvenv.cfg"
+    if venv_dir.exists() and not venv_cfg.exists():
+        shutil.rmtree(venv_dir, ignore_errors=True)
+    if not venv_dir.exists():
+        subprocess.run([python, "-m", "venv", str(venv_dir)], check=False)
+    if not venv_cfg.exists():
+        msg_error("pyvenv.cfg not found after venv creation. Please re-run setup.")
+        return False
+
+    venv_py = venv_dir / "Scripts" / "python.exe"
+    msg_step(2, 3, "Installing router requirements...")
+    subprocess.run([str(venv_py), "-m", "pip", "install", "--upgrade", "pip"], check=False)
+    subprocess.run(
+        [str(venv_py), "-m", "pip", "install", "-r", str(ROUTER_DIR / "requirements.txt")],
+        check=False,
+    )
+
+    if not CONFIG_FILE.exists():
+        CONFIG_FILE.write_text("{}", encoding="utf-8")
+    if not CADDYFILE.exists() and CADDY_TEMPLATE.exists():
+        CADDYFILE.write_text(CADDY_TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
+
+    msg_step(3, 3, "Caddy (optional)")
+    if install_caddy:
+        install_caddy_windows()
+
+    print()
+    msg_info("Next steps:")
+    print("1) Start both Caddy + router:")
+    print("   devhost start")
+    print("2) Add a mapping:")
+    print("   devhost add hello 8000")
+    return True
+
+
+def install_macos(args: list[str]) -> bool:
+    script = SCRIPT_DIR / "scripts" / "setup-macos.sh"
+    if not script.exists():
+        msg_error("scripts/setup-macos.sh not found.")
+        return False
+    cmd = ["bash", str(script)] + args
+    subprocess.run(cmd, check=False)
+    return True
+
+
+def install_linux(args: list[str]) -> bool:
+    script = SCRIPT_DIR / "install.sh"
+    if not script.exists():
+        msg_error("install.sh not found.")
+        return False
+    cmd = ["bash", str(script)] + args
+    subprocess.run(cmd, check=False)
+    return True
+    
+    def remove(self, name: str):
+        """Remove a mapping"""
+        routes = self.config.load()
+        
+        if name not in routes:
+            domain = self.config.get_domain()
+            msg_error(f"No mapping found for {name}.{domain}")
+            return False
+        
+        del routes[name]
+        self.config.save(routes)
+        generate_caddyfile(routes)
+
+        if IS_WINDOWS:
+            domain = self.config.get_domain()
+            if domain != "localhost" and is_admin():
+                hosts_remove(f"{name}.{domain}")
+        
+        domain = self.config.get_domain()
+        msg_success(f"Removed mapping: {name}.{domain}")
+        return True
+    
+    def list_mappings(self, json_output: bool = False):
+        """List all mappings"""
+        routes = self.config.load()
+        domain = self.config.get_domain()
+        
+        if json_output:
+            print(json.dumps(routes, indent=2))
+            return True
+        
+        if not routes:
+            msg_info("No mappings yet")
+            msg_info("Add one with: devhost add <name> <port>")
+            return True
+        
+        print(f"\n{Colors.BLUE}Configured Routes:{Colors.RESET}\n")
+        
+        for name, target in sorted(routes.items()):
+            parsed = parse_target(str(target))
+            if parsed:
+                scheme, host, port = parsed
+                url = f"{scheme}://{name}.{domain}"
+                target_str = f"{scheme}://{host}:{port}"
+                
+                # Check if service is running
+                status = ""
+                if check_port_open(host, port, timeout=0.5):
+                    status = f"{Colors.GREEN}●{Colors.RESET}"
+                else:
+                    status = f"{Colors.RED}○{Colors.RESET}"
+                
+                print(f"  {status} {Colors.BLUE}{url:30}{Colors.RESET} → {target_str}")
+            else:
+                print(f"  ? {name}.{domain:30} → {target} (invalid)")
+        
+        print()
+        return True
+    
+    def url(self, name: Optional[str] = None):
+        """Get URL for a mapping"""
+        routes = self.config.load()
+        domain = self.config.get_domain()
+        
+        if not routes:
+            msg_error("No mappings configured")
+            return False
+        
+        # Use first mapping if no name specified
+        if not name:
+            name = sorted(routes.keys())[0]
+        
+        if name not in routes:
+            msg_error(f"No mapping found for {name}")
+            return False
+        
+        target = routes[name]
+        scheme = get_dev_scheme(target)
+        url = f"{scheme}://{name}.{domain}"
+        print(url)
+        if sys.stdin.isatty():
+            print("Press Ctrl+O to open in browser, any other key to skip...", end=" ", flush=True)
+            key = read_single_key()
+            print()
+            if key == "\x0f":
+                open_in_browser(url)
+        return True
+    
+    def open_browser(self, name: Optional[str] = None):
+        """Open mapping in browser"""
+        routes = self.config.load()
+        domain = self.config.get_domain()
+        
+        if not routes:
+            msg_error("No mappings configured")
+            return False
+        
+        # Use first mapping if no name specified
+        if not name:
+            name = sorted(routes.keys())[0]
+        
+        if name not in routes:
+            msg_error(f"No mapping found for {name}")
+            return False
+        
+        target = routes[name]
+        parsed = parse_target(str(target))
+        if not parsed:
+            msg_error(f"Invalid target for {name}")
+            return False
+        
+        scheme, host, port = parsed
+        url = f"{scheme}://{name}.{domain}"
+        
+        msg_info(f"Opening {url}...")
+        if open_in_browser(url):
+            return True
+        msg_error("Failed to open browser.")
+        msg_info(f"Manually open: {url}")
+        return False
+    
+    def validate(self):
+        """Quick validation of configuration and services"""
+        print(f"\n{Colors.BLUE}Devhost Validation{Colors.RESET}\n")
+        
+        # Check config file
+        if CONFIG_FILE.exists():
+            try:
+                self.config.load()
+                msg_success(f"Config file: {CONFIG_FILE}")
+            except Exception as e:
+                msg_error(f"Config file invalid: {e}")
+        else:
+            msg_warning("Config file not found (will be created)")
+        
+        # Check router
+        if check_router_health():
+            msg_success("Router: responding on :5555")
+        else:
+            msg_error("Router: not responding")
+            msg_info("Start with: devhost start")
+        
+        # Check first mapping's DNS
+        routes = self.config.load()
+        if routes:
+            name = sorted(routes.keys())[0]
+            domain = self.config.get_domain()
+            fqdn = f"{name}.{domain}"
+            
+            # Try to resolve
+            try:
+                socket.gethostbyname(fqdn)
+                msg_success(f"DNS: {fqdn} resolves")
+            except socket.gaierror:
+                msg_error(f"DNS: {fqdn} does not resolve")
+                msg_info("DNS setup may be needed for wildcard domains")
+        
+        print()
+        return True
+    
+    def resolve(self, name: str):
+        """Show resolution details for a mapping"""
+        routes = self.config.load()
+        domain = self.config.get_domain()
+        
+        if name not in routes:
+            msg_error(f"No mapping found for {name}")
+            return False
+        
+        target = routes[name]
+        parsed = parse_target(str(target))
+        if not parsed:
+            msg_error(f"Invalid target for {name}")
+            return False
+        
+        scheme, host, port = parsed
+        fqdn = f"{name}.{domain}"
+        
+        print(f"\n{Colors.BLUE}Resolution for {name}:{Colors.RESET}\n")
+        print(f"  Domain: {fqdn}")
+        print(f"  Target: {scheme}://{host}:{port}")
+        
+        # DNS resolution
+        try:
+            ip = socket.gethostbyname(fqdn)
+            msg_success(f"DNS: {fqdn} → {ip}")
+        except socket.gaierror:
+            msg_error(f"DNS: {fqdn} does not resolve")
+        
+        # Port check
+        if check_port_open(host, port):
+            msg_success(f"Port: {host}:{port} is open")
+        else:
+            msg_error(f"Port: {host}:{port} is not reachable")
+        
+        print()
+        return True
+    
+    def doctor(self):
+        """Run comprehensive diagnostics"""
+        print(f"\n{Colors.BLUE}Devhost Doctor{Colors.RESET}\n")
+        
+        # Platform info
+        print(f"Platform: {platform.system()} {platform.release()}")
+        print(f"Python: {sys.version.split()[0]}")
+        print()
+        
+        # Run validation
+        self.validate()
+        
+        # Router details
+        running, pid = self.router.is_running()
+        if running:
+            msg_success(f"Router process: running{f' (pid {pid})' if pid else ''}")
+            msg_info(f"Logs: {self.router.log_file}")
+        else:
+            msg_error("Router process: not running")
+        
+        print()
+        return True
+
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Devhost - Lightweight local development domain router",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    parser.add_argument("--version", action="version", version=f"devhost {VERSION}")
+    
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+    
+    # add command
+    add_parser = subparsers.add_parser("add", help="Add a new mapping")
+    add_parser.add_argument("name", help="Service name (e.g., myapp)")
+    add_parser.add_argument("target", help="Port or host:port or URL")
+    add_parser.add_argument("--http", action="store_const", const="http", dest="scheme", help="Force HTTP")
+    add_parser.add_argument("--https", action="store_const", const="https", dest="scheme", help="Force HTTPS")
+    
+    # remove command
+    remove_parser = subparsers.add_parser("remove", help="Remove a mapping")
+    remove_parser.add_argument("name", help="Service name to remove")
+    
+    # list command
+    list_parser = subparsers.add_parser("list", help="List all mappings")
+    list_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    
+    # url command
+    url_parser = subparsers.add_parser("url", help="Get URL for a mapping")
+    url_parser.add_argument("name", nargs="?", help="Service name (uses first if omitted)")
+    
+    # open command
+    open_parser = subparsers.add_parser("open", help="Open mapping in browser")
+    open_parser.add_argument("name", nargs="?", help="Service name (uses first if omitted)")
+    
+    # validate command
+    subparsers.add_parser("validate", help="Validate configuration and services")
+
+    # export command
+    export_parser = subparsers.add_parser("export", help="Print generated Caddyfile")
+    export_parser.add_argument("what", nargs="?", default="")
+
+    # edit command
+    subparsers.add_parser("edit", help="Open devhost.json in editor")
+    
+    # resolve command
+    resolve_parser = subparsers.add_parser("resolve", help="Show resolution details")
+    resolve_parser.add_argument("name", help="Service name")
+    
+    # doctor command
+    doctor_parser = subparsers.add_parser("doctor", help="Run comprehensive diagnostics")
+    doctor_parser.add_argument("--windows", action="store_true")
+    doctor_parser.add_argument("--fix", action="store_true")
+
+    # info command
+    subparsers.add_parser("info", help="Show help")
+
+    # hosts command (Windows)
+    hosts_parser = subparsers.add_parser("hosts", help="Manage Windows hosts entries")
+    hosts_parser.add_argument("action", choices=["sync", "clear"])
+
+    # caddy command (Windows)
+    caddy_parser = subparsers.add_parser("caddy", help="Manage Caddy (Windows)")
+    caddy_parser.add_argument("action", choices=["start", "stop", "restart", "status"])
+    
+    # domain command
+    domain_parser = subparsers.add_parser("domain", help="Get or set base domain")
+    domain_parser.add_argument("name", nargs="?", help="Domain name to set")
+    
+    # start command
+    subparsers.add_parser("start", help="Start router process (and Caddy on Windows)")
+    
+    # stop command
+    subparsers.add_parser("stop", help="Stop router process")
+    
+    # status command
+    status_parser = subparsers.add_parser("status", help="Check router status")
+    status_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # install command
+    install_parser = subparsers.add_parser("install", help="Run installer")
+    install_parser.add_argument("--windows", action="store_true")
+    install_parser.add_argument("--macos", action="store_true")
+    install_parser.add_argument("--linux", action="store_true")
+    install_parser.add_argument("--caddy", action="store_true")
+    install_parser.add_argument("rest", nargs=argparse.REMAINDER)
+    
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
         return 0
-    fi
 
-    json=$(load_json)
-    domain=$(get_domain)
-    if command -v jq &> /dev/null; then
-        count=$(echo "$json" | jq 'length')
-        if [ "$count" -eq 0 ]; then
-            echo "No mappings yet. Add one with: devhost add <name> <port>"
-            return 0
-        fi
-        echo "$json" | jq -r --arg d "$domain" '
-            to_entries[] | 
-            (.value|tostring) as $v |
-            "\(.key)."+$d+" -> "+(if $v|test("^[0-9]+$") then "127.0.0.1:"+$v else $v end)
-        '
-    else
-        if [ -z "$PYTHON_BIN" ]; then
-            echo "No mappings yet. Add one with: devhost add <name> <port>"
-            return 0
-        fi
-        "$PYTHON_BIN" - "$CONFIG" "$domain" <<PY
-import json,sys
-domain=sys.argv[2]
-try:
-    data=json.load(open(sys.argv[1]))
-except Exception:
-    data={}
-if not data:
-    print("No mappings yet. Add one with: devhost add <name> <port>")
-else:
-    for k,v in data.items():
-        s=str(v)
-        if s.isdigit():
-            s=f"127.0.0.1:{s}"
-        print(f"{k}.{domain} -> {s}")
-PY
-    fi
-}
+    if args.command in {"add", "remove", "hosts", "domain"}:
+        ensure_admin_if_needed(
+            args.command,
+            [a for a in sys.argv[2:] if a != "--elevated"],
+            Config().get_domain(),
+        )
 
-url() {
-    name=$1
-    if [ -z "$name" ]; then
-        name=$(first_mapping_name)
-        if [ -z "$name" ]; then
-            echo "No mappings found. Add one with: devhost add <name> <port>"
+    cli = DevhostCLI()
+    
+    try:
+        if args.command == "add":
+            success = cli.add(args.name, args.target, args.scheme)
+        elif args.command == "remove":
+            success = cli.remove(args.name)
+        elif args.command == "list":
+            success = cli.list_mappings(args.json)
+        elif args.command == "url":
+            success = cli.url(args.name)
+        elif args.command == "open":
+            success = cli.open_browser(args.name)
+        elif args.command == "validate":
+            success = cli.validate()
+        elif args.command == "resolve":
+            success = cli.resolve(args.name)
+        elif args.command == "doctor":
+            if args.windows or IS_WINDOWS:
+                doctor_windows(fix=args.fix)
+                success = True
+            else:
+                success = cli.doctor()
+        elif args.command == "info":
+            parser.print_help()
+            success = True
+        elif args.command == "export":
+            if args.what == "caddy":
+                print_caddyfile(cli.config.load())
+                success = True
+            else:
+                msg_error("Usage: devhost export caddy")
+                success = False
+        elif args.command == "edit":
+            edit_config()
+            success = True
+        elif args.command == "hosts":
+            if not IS_WINDOWS:
+                msg_error("Hosts management is supported on Windows only.")
+                success = False
+            elif not is_admin():
+                msg_error("Hosts management requires Administrator privileges.")
+                success = False
+            else:
+                if args.action == "sync":
+                    hosts_sync()
+                else:
+                    hosts_clear()
+                success = True
+        elif args.command == "caddy":
+            if not IS_WINDOWS:
+                msg_error("Caddy management is supported on Windows only.")
+                success = False
+            else:
+                if args.action == "start":
+                    caddy_start()
+                elif args.action == "stop":
+                    caddy_stop()
+                elif args.action == "restart":
+                    caddy_restart()
+                else:
+                    caddy_status()
+                success = True
+        elif args.command == "domain":
+            if args.name:
+                success = cli.config.set_domain(args.name)
+            else:
+                print(cli.config.get_domain())
+                success = True
+        elif args.command == "start":
+            success = cli.router.start()
+        elif args.command == "stop":
+            success = cli.router.stop()
+        elif args.command == "status":
+            success = cli.router.status(args.json)
+        elif args.command == "install":
+            if args.windows or IS_WINDOWS:
+                success = install_windows(args.caddy)
+            elif args.macos or IS_MACOS:
+                success = install_macos(args.rest)
+            elif args.linux or IS_LINUX:
+                success = install_linux(args.rest)
+            else:
+                msg_error("Unsupported platform for install.")
+                success = False
+        else:
+            parser.print_help()
             return 1
-        fi
-    fi
-    target=$(get_port_for_name "$name")
-    if [ -z "$target" ]; then
-        base_domain=$(get_domain)
-        echo "No mapping found for ${name}.${base_domain}"
+        
+        return 0 if success else 1
+    
+    except KeyboardInterrupt:
+        print("\nInterrupted")
+        return 130
+    except Exception as e:
+        msg_error(f"Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
-    fi
-    base_domain=$(get_domain)
-    scheme=$(get_dev_scheme "$target")
-    echo "${scheme}://${name}.${base_domain}"
-    # Optional: open when Ctrl+O is pressed (interactive only)
-    if [ -t 0 ]; then
-        read -r -n 1 -s -p "Press Ctrl+O to open in browser, any other key to skip... " key
-        echo
-        if [ "$key" = $'\x0f' ]; then
-            open_in_browser "${scheme}://${name}.${base_domain}"
-        fi
-    fi
-}
 
-open_cmd() {
-    name=$1
-    if [ -z "$name" ]; then
-        name=$(first_mapping_name)
-        if [ -z "$name" ]; then
-            echo "No mappings found. Add one with: devhost add <name> <port>"
-            return 1
-        fi
-    fi
-    target=$(get_port_for_name "$name")
-    if [ -z "$target" ]; then
-        base_domain=$(get_domain)
-        echo "No mapping found for ${name}.${base_domain}"
-        return 1
-    fi
-    base_domain=$(get_domain)
-    scheme=$(get_dev_scheme "$target")
-    open_in_browser "${scheme}://${name}.${base_domain}"
-}
 
-validate() {
-    echo "Config: $CONFIG"
-    if [ ! -f "$CONFIG" ]; then
-        echo "Config file missing."
-        return 1
-    fi
-
-    if command -v jq &> /dev/null; then
-        if ! jq empty "$CONFIG" >/dev/null 2>&1; then
-            echo "Config JSON: invalid"
-            return 1
-        fi
-    elif [ -n "$PYTHON_BIN" ]; then
-        if ! "$PYTHON_BIN" - "$CONFIG" <<'PY' >/dev/null 2>&1
-import json,sys
-json.load(open(sys.argv[1]))
-PY
-        then
-            echo "Config JSON: invalid"
-            return 1
-        fi
-    fi
-    echo "Config JSON: OK"
-
-    if command -v curl &>/dev/null; then
-        if curl -sS --max-time 2 http://127.0.0.1:5555/health >/dev/null 2>&1; then
-            echo "Router: OK"
-        else
-            echo "Router: not responding"
-        fi
-    else
-        echo "Router: curl not available"
-    fi
-
-    name=$(first_mapping_name)
-    base_domain=$(get_domain)
-    if [ -n "$name" ]; then
-        if command -v dig >/dev/null 2>&1; then
-            if dig +short "${name}.${base_domain}" | grep -q '127.0.0.1'; then
-                echo "DNS: OK (${name}.${base_domain} -> 127.0.0.1)"
-            else
-                echo "DNS: unresolved for ${name}.${base_domain}"
-            fi
-        elif command -v getent >/dev/null 2>&1; then
-            if getent hosts "${name}.${base_domain}" | grep -q '127.0.0.1'; then
-                echo "DNS: OK (${name}.${base_domain} -> 127.0.0.1)"
-            else
-                echo "DNS: unresolved for ${name}.${base_domain}"
-            fi
-        else
-            echo "DNS: dig/getent not available"
-        fi
-    else
-        echo "DNS: no mappings to test"
-    fi
-}
-
-START_PID_FILE="$ROOT_DIR/.devhost/router.pid"
-START_LOG_FILE="/tmp/devhost-router.log"
-
-start() {
-    # ensure router folder
-    mkdir -p "$(dirname "$START_PID_FILE")"
-    if [ -f "$START_PID_FILE" ]; then
-        pid=$(cat "$START_PID_FILE" 2>/dev/null || true)
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            echo "Router already running (pid $pid)"
-            return 0
-        else
-            rm -f "$START_PID_FILE" || true
-        fi
-    fi
-
-    # prefer using a python inside a venv if available
-    VENV_PYTHON=""
-    if [ -x "$ROOT_DIR/router/venv/bin/python" ]; then
-        VENV_PYTHON="$ROOT_DIR/router/venv/bin/python"
-    elif [ -x "$ROOT_DIR/router/venv/Scripts/python.exe" ]; then
-        VENV_PYTHON="$ROOT_DIR/router/venv/Scripts/python.exe"
-    elif [ -x "$ROOT_DIR/router/.venv/bin/python" ]; then
-        VENV_PYTHON="$ROOT_DIR/router/.venv/bin/python"
-    elif [ -x "$ROOT_DIR/router/.venv/Scripts/python.exe" ]; then
-        VENV_PYTHON="$ROOT_DIR/router/.venv/Scripts/python.exe"
-    elif [ -x "$ROOT_DIR/.venv/bin/python" ]; then
-        VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
-    elif [ -x "$ROOT_DIR/.venv/Scripts/python.exe" ]; then
-        VENV_PYTHON="$ROOT_DIR/.venv/Scripts/python.exe"
-    fi
-
-    if [ -n "$VENV_PYTHON" ]; then
-        # normalize to absolute path to avoid relative path issues when cd'ing into router
-        if command -v readlink >/dev/null 2>&1; then
-            VENV_PYTHON_ABS=$(readlink -f "$VENV_PYTHON" 2>/dev/null || true)
-        fi
-        if [ -z "${VENV_PYTHON_ABS:-}" ]; then
-            VENV_PYTHON_ABS="$(cd "$(dirname "$VENV_PYTHON")" 2>/dev/null && pwd)/$(basename "$VENV_PYTHON")"
-        fi
-        VENV_PYTHON="$VENV_PYTHON_ABS"
-        echo "Using venv python: $VENV_PYTHON"
-        # ensure uvicorn installed in venv
-        if ! "$VENV_PYTHON" -c "import uvicorn" >/dev/null 2>&1; then
-        if [ -f "$ROOT_DIR/router/requirements.txt" ]; then
-            echo "uvicorn not found in venv; installing requirements into venv"
-            "$VENV_PYTHON" -m pip install -r "$ROOT_DIR/router/requirements.txt" || true
-        fi
-        fi
-        START_CMD=("$VENV_PYTHON" -m uvicorn app:app --host 127.0.0.1 --port 5555)
-    else
-        # fallback to uvicorn binary or system python
-        if [ -x "$ROOT_DIR/.venv/bin/uvicorn" ]; then
-            START_CMD=("$(cd "$(dirname "$ROOT_DIR/.venv/bin/uvicorn")" && pwd)/$(basename "$ROOT_DIR/.venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
-        elif [ -x "$ROOT_DIR/router/.venv/bin/uvicorn" ]; then
-            START_CMD=("$(cd "$(dirname "$ROOT_DIR/router/.venv/bin/uvicorn")" && pwd)/$(basename "$ROOT_DIR/router/.venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
-        elif [ -x "$ROOT_DIR/router/venv/bin/uvicorn" ]; then
-            START_CMD=("$(cd "$(dirname "$ROOT_DIR/router/venv/bin/uvicorn")" && pwd)/$(basename "$ROOT_DIR/router/venv/bin/uvicorn")" "app:app" "--host" "127.0.0.1" "--port" "5555")
-        elif command -v uvicorn &>/dev/null; then
-            START_CMD=("$(command -v uvicorn)" "app:app" "--host" "127.0.0.1" "--port" "5555")
-        else
-            START_CMD=("python3" -m uvicorn app:app --host 127.0.0.1 --port 5555)
-        fi
-    fi
-
-    echo "Starting router with command: ${START_CMD[*]}"
-    # start in router directory but manage pidfile from repo root
-    pushd "$ROOT_DIR/router" >/dev/null 2>&1 || return 1
-    nohup "${START_CMD[@]}" > "$START_LOG_FILE" 2>&1 &
-    pid=$!
-    popd >/dev/null 2>&1 || true
-    echo "$pid" > "$START_PID_FILE" || { echo "Failed to write pidfile $START_PID_FILE"; return 1; }
-    sleep 1
-    if kill -0 "$pid" 2>/dev/null; then
-        echo "Router started (pid $pid), logs: $START_LOG_FILE"
-    else
-        echo "Failed to start router; check $START_LOG_FILE"
-        return 1
-    fi
-}
-
-stop() {
-    if [ ! -f "$START_PID_FILE" ]; then
-        echo "Router does not appear to be running (no pidfile)."
-        return 0
-    fi
-    pid=$(cat "$START_PID_FILE" 2>/dev/null || true)
-    if [ -z "$pid" ]; then
-        echo "No pid in pidfile; removing."; rm -f "$START_PID_FILE"; return 0
-    fi
-    if kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" && echo "Sent SIGTERM to $pid" || echo "Failed to kill $pid"
-        sleep 1
-        if kill -0 "$pid" 2>/dev/null; then
-            kill -9 "$pid" && echo "Sent SIGKILL to $pid"
-        fi
-    else
-        echo "Process $pid not running; cleaning pidfile"
-    fi
-    rm -f "$START_PID_FILE"
-}
-
-status() {
-    if [ "${1:-}" = "--json" ]; then
-        running=false
-        pid=""
-        health="unknown"
-        if [ -f "$START_PID_FILE" ]; then
-            pid=$(cat "$START_PID_FILE" 2>/dev/null || true)
-            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                running=true
-            fi
-        else
-            if command -v curl &>/dev/null; then
-                if curl -sS --max-time 2 http://127.0.0.1:5555/health >/dev/null 2>&1; then
-                    running=true
-                fi
-            fi
-        fi
-        if command -v curl &>/dev/null; then
-            if curl -sS --max-time 2 http://127.0.0.1:5555/health >/dev/null 2>&1; then
-                health="ok"
-            else
-                health="not_responding"
-            fi
-        fi
-        printf '{"running":%s,"pid":%s,"health":"%s"}\n' \
-            "$running" \
-            "$( [ -n "$pid" ] && echo "$pid" || echo null )" \
-            "$health"
-        return 0
-    fi
-    if [ -f "$START_PID_FILE" ]; then
-        pid=$(cat "$START_PID_FILE" 2>/dev/null || true)
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            echo "Router running (pid $pid)"
-            # check health
-            if command -v curl &>/dev/null; then
-                if curl -sS --max-time 2 http://127.0.0.1:5555/health >/dev/null 2>&1; then
-                    echo "Health check: OK"
-                else
-                    echo "Health check: not responding"
-                fi
-            fi
-            return 0
-        else
-            echo "Stale pidfile found (pid $pid not running)"
-            return 1
-        fi
-    else
-        # fallback: try health endpoint
-        if command -v curl &>/dev/null; then
-            if curl -sS --max-time 2 http://127.0.0.1:5555/health >/dev/null 2>&1; then
-                echo "Router responding on http://127.0.0.1:5555 (no pidfile)"
-                return 0
-            fi
-        fi
-        echo "Router not running"
-        return 1
-    fi
-}
-
-case "$1" in
-    add) add "${@:2}" ;;
-    remove) remove $2 ;;
-    list) list "${@:2}" ;;
-    url) url $2 ;;
-    open) open_cmd $2 ;;
-    validate) validate ;;
-    edit) edit_config ;;
-    resolve) resolve_mapping $2 ;;
-    doctor) doctor ;;
-    hosts) hosts_cmd ;;
-    domain)
-        if [ -n "${2:-}" ]; then
-            set_domain "$2"
-        else
-            get_domain
-        fi
-        ;;
-    info|help|-h|--help) print_usage ;;
-    export)
-        if [[ "$2" == "caddy" ]]; then
-            print_caddyfile
-        else
-            echo "Usage: devhost export caddy"
-            exit 1
-        fi
-        ;;
-    start) start ;;
-    stop) stop ;;
-    status) status "$2" ;;
-    install)
-        # support: devhost install --macos | --windows
-        if [[ "$2" == "--macos" || "$2" == "macos" ]]; then
-            if [[ -x "scripts/setup-macos.sh" ]]; then
-                bash scripts/setup-macos.sh "${@:3}"
-            else
-                bash ./scripts/setup-macos.sh "${@:3}"
-            fi
-        elif [[ "$2" == "--windows" || "$2" == "windows" ]]; then
-            if command -v powershell.exe >/dev/null 2>&1; then
-                powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$ROOT_DIR/scripts/setup-windows.ps1"
-            else
-                echo "powershell.exe not found; run scripts/setup-windows.ps1 from Windows PowerShell."
-                exit 1
-            fi
-        else
-            echo "Usage: devhost install --macos | --windows"
-            exit 1
-        fi
-        ;;
-    *) print_usage;;
-esac
-hosts_cmd() {
-    echo "Hosts management is supported on Windows via devhost.ps1."
-    echo "Usage: devhost.ps1 hosts sync|clear"
-    return 1
-}
+if __name__ == "__main__":
+    sys.exit(main())

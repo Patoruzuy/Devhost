@@ -37,6 +37,14 @@ devhost remove hello
 
 Visit `hello.localhost` in your browser.
 
+Note: the `devhost` CLI is now implemented in Python (cross-platform). The prior bash script is kept as `devhost.sh` for reference during the migration.
+
+Cross-platform installer (uses the Python CLI):
+
+```bash
+python install.py --linux
+```
+
 To change the base domain (for example, `hello.flask`), set it once and re-run your installer to update DNS/resolvers:
 
 ```bash
@@ -93,6 +101,32 @@ Quick Commands
 - `devhost hosts clear` — remove all devhost entries from the Windows hosts file (admin).
 - `devhost caddy start|stop|restart|status` — manage Caddy on Windows.
 
+
+## How It Works
+
+Devhost consists of two components:
+
+1. **Router** - A FastAPI app that proxies requests based on subdomain
+2. **CLI** - Python script to manage configuration
+
+```
+┌─────────────┐
+│   Browser   │
+└──────┬──────┘
+       │ http://myapp.localhost
+       │
+┌──────▼────────┐
+│ Devhost Router│ :5555
+│  (localhost)  │
+└──────┬────────┘
+       │ Routing based on subdomain
+       │
+┌──────▼────────┐
+│   Your App    │ :3000
+│  (localhost)  │
+└───────────────┘
+```
+
 Configuration
 
 The project uses a `devhost.json` file (project root) with a simple mapping of names to ports. Example:
@@ -105,6 +139,19 @@ The project uses a `devhost.json` file (project root) with a simple mapping of n
 ```
 
 This file is created/updated by the CLI and is meant to be local (it’s gitignored). The router reads `DEVHOST_CONFIG` if set; otherwise it looks for the project root `devhost.json` (even when run from `router/`). The base domain comes from `DEVHOST_DOMAIN` or `.devhost/domain` (default: `localhost`).
+
+Router endpoints
+
+- `GET /health` — liveness + route count + uptime.
+- `GET /metrics` — basic request metrics (totals, per-status, per-subdomain).
+- `GET /routes` — current routes with parsed targets.
+- `GET /mappings` — current routes with basic TCP health checks.
+
+Logging
+
+- `DEVHOST_LOG_LEVEL` controls router log verbosity (default: `INFO`).
+- `DEVHOST_LOG_FILE` writes logs to a file in addition to stdout.
+- `DEVHOST_LOG_REQUESTS=1` enables per-request logging.
 
 Quick test (curl)
 
@@ -203,6 +250,13 @@ You can run the CLI from Windows PowerShell using the shim:
 
 ```powershell
 .\devhost.ps1 add hello 8000
+```
+
+If you prefer the Python CLI, you can run:
+
+```powershell
+python .\devhost install --windows --caddy
+python .\devhost add hello 8000
 ```
 
 Note: the router requires a Host header. Don’t browse `http://127.0.0.1:5555` directly — use `devhost open <name>` or:

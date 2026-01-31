@@ -59,7 +59,7 @@ PY
             return 0
             ;;
         install)
-            COMPREPLY=( $(compgen -W "--macos --windows" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--macos --windows --linux --caddy" -- "$cur") )
             return 0
             ;;
     esac

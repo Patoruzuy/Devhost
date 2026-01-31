@@ -5,6 +5,7 @@ import json
 import os
 import logging
 import asyncio
+import time
 from pathlib import Path
 import uvicorn
 from typing import Optional, Dict, Tuple
@@ -13,11 +14,49 @@ from urllib.parse import urlparse
 app = FastAPI()
 
 LOG_LEVEL = os.getenv("DEVHOST_LOG_LEVEL", "INFO").upper()
+LOG_FILE = os.getenv("DEVHOST_LOG_FILE")
+LOG_REQUESTS = os.getenv("DEVHOST_LOG_REQUESTS", "").lower() in {"1", "true", "yes", "on"}
+handlers = [logging.StreamHandler()]
+if LOG_FILE:
+    try:
+        handlers.append(logging.FileHandler(LOG_FILE))
+    except Exception:
+        pass
 logging.basicConfig(
     level=LOG_LEVEL,
     format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    handlers=handlers,
+    force=True,
 )
 logger = logging.getLogger("devhost.router")
+START_TIME = time.time()
+
+
+class Metrics:
+    def __init__(self) -> None:
+        self.requests_total = 0
+        self.requests_by_status: Dict[int, int] = {}
+        self.requests_by_subdomain: Dict[str, Dict[str, int]] = {}
+
+    def record(self, subdomain: Optional[str], status_code: int) -> None:
+        self.requests_total += 1
+        self.requests_by_status[status_code] = self.requests_by_status.get(status_code, 0) + 1
+        if subdomain:
+            bucket = self.requests_by_subdomain.setdefault(subdomain, {"count": 0, "errors": 0})
+            bucket["count"] += 1
+            if status_code >= 400:
+                bucket["errors"] += 1
+
+    def snapshot(self) -> Dict[str, object]:
+        return {
+            "uptime_seconds": int(time.time() - START_TIME),
+            "requests_total": self.requests_total,
+            "requests_by_status": self.requests_by_status,
+            "requests_by_subdomain": self.requests_by_subdomain,
+        }
+
+
+METRICS = Metrics()
 
 
 def load_domain() -> str:
@@ -173,10 +212,63 @@ def parse_target(value) -> Optional[Tuple[str, int, str]]:
     return None
 
 
+@app.middleware("http")
+async def request_metrics(request: Request, call_next):
+    host_header = request.headers.get("host", "")
+    subdomain = extract_subdomain(host_header, load_domain())
+    start = time.time()
+    response = await call_next(request)
+    METRICS.record(subdomain, response.status_code)
+    if LOG_REQUESTS:
+        duration_ms = int((time.time() - start) * 1000)
+        logger.info(
+            "%s %s -> %d (%dms)",
+            request.method,
+            request.url.path or "/",
+            response.status_code,
+            duration_ms,
+        )
+    return response
+
+
 @app.get("/health")
 async def health():
     """Lightweight health endpoint for liveness checks."""
-    return JSONResponse({"status": "ok", "version": "v1.0.0"})
+    routes = await ROUTE_CACHE.get_routes()
+    return JSONResponse(
+        {
+            "status": "ok",
+            "version": "v1.0.0",
+            "routes_count": len(routes),
+            "uptime_seconds": int(time.time() - START_TIME),
+        }
+    )
+
+
+@app.get("/metrics")
+async def metrics():
+    """Basic request metrics."""
+    return JSONResponse(METRICS.snapshot())
+
+
+@app.get("/routes")
+async def routes():
+    """Return current routes with parsed targets."""
+    routes_map = await ROUTE_CACHE.get_routes()
+    domain = load_domain()
+    output = {}
+    for name, target_value in routes_map.items():
+        target = parse_target(target_value)
+        if not target:
+            output[name] = {"target": target_value, "error": "invalid target"}
+            continue
+        scheme, host, port = target
+        output[name] = {
+            "url": f"{scheme}://{name}.{domain}",
+            "target": f"{scheme}://{host}:{port}",
+            "raw": target_value,
+        }
+    return JSONResponse({"domain": domain, "routes": output})
 
 
 async def _check_tcp(host: str, port: int, timeout: float = 0.5) -> bool:
