@@ -2,6 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DOMAIN="${DEVHOST_DOMAIN:-}"
+if [ "${1:-}" = "--domain" ] && [ -n "${2:-}" ]; then
+    DOMAIN="$2"
+    shift 2
+fi
+DOMAIN_FILE="$ROOT_DIR/.devhost/domain"
+if [ -z "$DOMAIN" ] && [ -f "$DOMAIN_FILE" ]; then
+    DOMAIN="$(tr -d ' \t\r\n' < "$DOMAIN_FILE")"
+fi
+DOMAIN="${DOMAIN:-localhost}"
 
 echo "[+] Installing dependencies..."
 
@@ -31,7 +41,7 @@ if ! command -v dnsmasq &> /dev/null; then
     sudo apt-get install -y dnsmasq
 fi
 
-# Configure dnsmasq for *.localhost
+# Configure dnsmasq for *.$DOMAIN
 echo "[+] Configuring dnsmasq..."
 DNSMASQ_CONF_DIR="/etc/dnsmasq.d"
 DNSMASQ_CONF_FILE="$DNSMASQ_CONF_DIR/devhost.conf"
@@ -45,22 +55,22 @@ fi
 
 if [ -d "$DNSMASQ_CONF_DIR" ]; then
     cat <<EOF | sudo tee "$DNSMASQ_CONF_FILE" >/dev/null
-address=/localhost/127.0.0.1
+address=/$DOMAIN/127.0.0.1
 listen-address=$DNSMASQ_LISTEN_ADDR
 bind-interfaces
 port=$DNSMASQ_PORT
 EOF
 else
-    if ! grep -q '^address=/localhost/127.0.0.1$' /etc/dnsmasq.conf; then
-        echo 'address=/localhost/127.0.0.1' | sudo tee -a /etc/dnsmasq.conf >/dev/null
+    if ! grep -Fq "address=/$DOMAIN/127.0.0.1" /etc/dnsmasq.conf; then
+        echo "address=/$DOMAIN/127.0.0.1" | sudo tee -a /etc/dnsmasq.conf >/dev/null
     fi
-    if ! grep -q '^listen-address=127.0.0.1$' /etc/dnsmasq.conf; then
+    if ! grep -Fq 'listen-address=127.0.0.1' /etc/dnsmasq.conf; then
         echo 'listen-address=127.0.0.1' | sudo tee -a /etc/dnsmasq.conf >/dev/null
     fi
-    if ! grep -q '^bind-interfaces$' /etc/dnsmasq.conf; then
+    if ! grep -Fq 'bind-interfaces' /etc/dnsmasq.conf; then
         echo 'bind-interfaces' | sudo tee -a /etc/dnsmasq.conf >/dev/null
     fi
-    if ! grep -q '^port=' /etc/dnsmasq.conf; then
+    if ! grep -Fq 'port=' /etc/dnsmasq.conf; then
         echo "port=$DNSMASQ_PORT" | sudo tee -a /etc/dnsmasq.conf >/dev/null
     fi
 fi
@@ -71,19 +81,19 @@ fi
 
 if [ "$DNSMASQ_PORT" -ne 53 ]; then
     if command -v systemctl &> /dev/null && systemctl is-active --quiet systemd-resolved; then
-        echo "[+] Configuring systemd-resolved to forward *.localhost to 127.0.0.1:$DNSMASQ_PORT"
+        echo "[+] Configuring systemd-resolved to forward *.$DOMAIN to 127.0.0.1:$DNSMASQ_PORT"
         RESOLVED_DROPIN_DIR="/etc/systemd/resolved.conf.d"
         RESOLVED_DROPIN_FILE="$RESOLVED_DROPIN_DIR/devhost.conf"
         sudo mkdir -p "$RESOLVED_DROPIN_DIR"
         cat <<EOF | sudo tee "$RESOLVED_DROPIN_FILE" >/dev/null
 [Resolve]
 DNS=127.0.0.1#$DNSMASQ_PORT
-Domains=~localhost
+Domains=~$DOMAIN
 EOF
         sudo systemctl restart systemd-resolved
     else
         echo "[!] systemd-resolved not active. Port 53 is in use, so dnsmasq is on $DNSMASQ_PORT."
-        echo "    You may need to free port 53 or configure your resolver to use 127.0.0.1#$DNSMASQ_PORT for *.localhost."
+        echo "    You may need to free port 53 or configure your resolver to use 127.0.0.1#$DNSMASQ_PORT for *.$DOMAIN."
     fi
 fi
 

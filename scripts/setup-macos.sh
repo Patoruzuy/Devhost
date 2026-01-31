@@ -5,17 +5,19 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TEMPLATE_PLIST="$ROOT_DIR/router/devhost-router.plist.tmpl"
 DEST_PLIST="$HOME/Library/LaunchAgents/devhost.router.plist"
 RESOLVER_DIR="/etc/resolver"
-RESOLVER_FILE="$RESOLVER_DIR/localhost"
+DOMAIN="${DEVHOST_DOMAIN:-}"
+DOMAIN_FILE="$ROOT_DIR/.devhost/domain"
+RESOLVER_FILE=""
 
 usage() {
   cat <<EOF
-Usage: $0 [--dry-run] [--yes] [--install-completions]
+Usage: $0 [--dry-run] [--yes] [--install-completions] [--domain <name>]
 
 Interactive helper to install Devhost router on macOS.
 It will:
  - pick or ask for a path to a uvicorn binary (venv or system)
  - generate a LaunchAgent plist from router/devhost-router.plist.tmpl
- - write a resolver file at /etc/resolver/localhost pointing to 127.0.0.1
+ - write a resolver file at /etc/resolver/<domain> pointing to 127.0.0.1
  - optionally start dnsmasq via Homebrew services and load the LaunchAgent
  - optionally install shell completions (zsh/bass where supported)
 
@@ -23,6 +25,7 @@ Options:
   --dry-run   Print actions without making changes
   --yes       Non-interactive: assume yes for prompts and start dnsmasq if available
   --install-completions  Install shell completions into ~/.zsh/completions and ~/.bash_completion.d
+  --domain <name>  Base domain to route (default: localhost)
 EOF
 }
 
@@ -30,15 +33,30 @@ DRY_RUN=false
 ASSUME_YES=false
 START_DNS=false
 INSTALL_COMPLETIONS=false
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=true ;;
-    --yes|-y) ASSUME_YES=true ;;
-    --start-dns) START_DNS=true ;;
-    --install-completions) INSTALL_COMPLETIONS=true ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=true; shift ;;
+    --yes|-y) ASSUME_YES=true; shift ;;
+    --start-dns) START_DNS=true; shift ;;
+    --install-completions) INSTALL_COMPLETIONS=true; shift ;;
+    --domain)
+      DOMAIN="${2:-}"
+      shift 2
+      ;;
+    --domain=*)
+      DOMAIN="${1#*=}"
+      shift
+      ;;
     -h|--help) usage; exit 0 ;;
+    *) shift ;;
   esac
 done
+
+if [ -z "$DOMAIN" ] && [ -f "$DOMAIN_FILE" ]; then
+  DOMAIN="$(tr -d ' \t\r\n' < "$DOMAIN_FILE")"
+fi
+DOMAIN="${DOMAIN:-localhost}"
+RESOLVER_FILE="$RESOLVER_DIR/$DOMAIN"
 
 echo "Devhost macOS setup helper"
 echo

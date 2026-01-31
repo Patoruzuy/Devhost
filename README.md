@@ -5,21 +5,22 @@
 
 **Secure, flexible local domain routing for developers.**
 
-Devhost allows you to map subdomains of `localhost` (e.g. `myapp.localhost`) to local app ports, with automatic HTTPS and wildcard routing via Caddy and a Python backend.
+Devhost allows you to map subdomains of a base domain (default: `localhost`, e.g. `myapp.localhost`) to local app ports, with automatic HTTPS and wildcard routing via Caddy and a Python backend.
 
 ## Features
 
 - Map domains like `app.localhost` → `localhost:1234`
-- Serve via HTTPS using Caddy's internal CA
+- HTTPS support via Caddy's internal CA (use `--https`)
 - Add/remove routes using a single CLI command
 - Wildcard reverse proxy using Python (FastAPI)
-- Supports macOS and Linux
+- Custom base domain (e.g. `hello.flask`)
+- Supports macOS, Linux, and Windows (native PowerShell shim)
 
 ## Benefits for Devs
 
 - No need to remember localhost:PORT combos
 - Clean and memorable dev URLs
-- Auto-HTTPS with Caddy (tls internal)
+- HTTP by default; HTTPS available with `--https`
 - Works with any language/framework running locally
 
 ## Quickstart
@@ -35,6 +36,13 @@ devhost remove hello
 ```
 
 Visit `hello.localhost` in your browser.
+
+To change the base domain (for example, `hello.flask`), set it once and re-run your installer to update DNS/resolvers:
+
+```bash
+devhost domain flask
+./install.sh --domain flask
+```
 
 Run the router locally (development):
 
@@ -68,8 +76,9 @@ Quick Commands
 - `devhost add <name> --https <port|host:port>` — force HTTPS when opening the dev URL.
 - `devhost remove <name>` — remove a mapping.
 - `devhost list` — show active mappings.
-- `devhost url <name>` — print the HTTPS URL and press Ctrl+O to open it in the browser.
-- `devhost open <name>` — open the HTTPS URL in the default browser.
+- `devhost list --json` — show mappings as JSON.
+- `devhost url <name>` — print the URL and press Ctrl+O to open it in the browser.
+- `devhost open <name>` — open the URL in the default browser.
 - `devhost validate` — quick health checks (config JSON, router health, DNS).
 - `devhost export caddy` — print the generated Caddyfile to stdout.
 - `devhost edit` — open `devhost.json` in `$EDITOR` (fallback: `nano`/`vi`).
@@ -77,6 +86,8 @@ Quick Commands
 - `devhost doctor` — deeper diagnostics (dnsmasq/systemd-resolved/Caddy).
 - `devhost info` — show all commands and usage.
 - `devhost status --json` — print router status as JSON (running, pid, health).
+- `devhost domain [name]` — show or set the base domain (default: `localhost`).
+- `devhost hosts sync` — re-apply hosts entries for all mappings on Windows (admin).
 
 Configuration
 
@@ -89,7 +100,7 @@ The project uses a `devhost.json` file (project root) with a simple mapping of n
 }
 ```
 
-The router reads `DEVHOST_CONFIG` if set; otherwise it looks for the project root `devhost.json` (even when run from `router/`).
+The router reads `DEVHOST_CONFIG` if set; otherwise it looks for the project root `devhost.json` (even when run from `router/`). The base domain comes from `DEVHOST_DOMAIN` or `.devhost/domain` (default: `localhost`).
 
 Quick test (curl)
 
@@ -119,8 +130,8 @@ Troubleshooting
 
 Platform notes
 
-- `install.sh` targets Debian/Ubuntu systems; Windows is not supported by the install script — run the router in Docker on Windows.
-- Windows setup is supported via `scripts/setup-windows.ps1` (see below).
+- `install.sh` targets Debian/Ubuntu systems; it reads `DEVHOST_DOMAIN` or `.devhost/domain` to configure DNS for the base domain.
+- Windows setup is supported via `scripts/setup-windows.ps1` (see below). If you change the base domain on Windows, run PowerShell as Administrator so Devhost can add hosts entries automatically, or use a local DNS resolver (Acrylic) for wildcard domains.
 
 Release notes
 
@@ -128,7 +139,7 @@ See `CHANGELOG.md` for the v1.0.0 release notes.
 
 macOS installer
 
-- An interactive installer script is available at `scripts/setup-macos.sh`. It generates a LaunchAgent plist from `router/devhost-router.plist.tmpl`, creates `/etc/resolver/localhost` pointing to `127.0.0.1`, and can optionally start `dnsmasq` via Homebrew and load the LaunchAgent.
+- An interactive installer script is available at `scripts/setup-macos.sh`. It generates a LaunchAgent plist from `router/devhost-router.plist.tmpl`, creates `/etc/resolver/<domain>` pointing to `127.0.0.1`, and can optionally start `dnsmasq` via Homebrew and load the LaunchAgent.
 - The installer accepts either a uvicorn binary path or `python3 -m uvicorn` and generates a valid LaunchAgent accordingly.
 - The installer can optionally install shell completions to `~/.zsh/completions` and `~/.bash_completion.d`.
 
@@ -161,6 +172,13 @@ If you want the script to also start dnsmasq automatically, pass `--start-dns`:
 devhost install --macos --yes --start-dns
 ```
 
+To use a custom base domain on macOS:
+
+```bash
+devhost domain flask
+devhost install --macos --domain flask
+```
+
 Windows installer
 
 Run the PowerShell setup script from Windows to prepare the venv, router deps, and initial config:
@@ -170,9 +188,25 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\setup-windows.ps1
 ```
 
+To clean and reinstall:
+
+```powershell
+.\scripts\setup-windows.ps1 -Clean
+```
+
 The Windows installer prints next-step instructions for installing Caddy and running the router.
 You can run the CLI from Windows PowerShell using the shim:
 
 ```powershell
 .\devhost.ps1 add hello 8000
 ```
+
+Note: the router requires a Host header. Don’t browse `http://127.0.0.1:5555` directly — use `devhost open <name>` or:
+
+```powershell
+curl -H "Host: hello.localhost" http://127.0.0.1:5555/
+
+Tip (Windows): if your app only listens on IPv4, Devhost uses `127.0.0.1` for numeric ports to avoid IPv6 `::1` connection errors.
+```
+
+Tip: On Windows, `devhost.ps1 start` will try to start Caddy (if installed) before starting the router.

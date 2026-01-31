@@ -4,7 +4,7 @@ _devhost_completions() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    cmds="add remove list url open validate export edit resolve doctor info start stop status install"
+    cmds="add remove list url open validate export edit resolve doctor info domain start stop status install"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${cmds}" -- "$cur") )
@@ -15,6 +15,10 @@ _devhost_completions() {
     case "$prev" in
         add)
             COMPREPLY=( $(compgen -W "--http --https" -- "$cur") )
+            return 0
+            ;;
+        list)
+            COMPREPLY=( $(compgen -W "--json" -- "$cur") )
             return 0
             ;;
         remove|url|open|resolve)
@@ -40,6 +44,10 @@ PY
             ;;
         status)
             COMPREPLY=( $(compgen -W "--json" -- "$cur") )
+            return 0
+            ;;
+        install)
+            COMPREPLY=( $(compgen -W "--macos --windows" -- "$cur") )
             return 0
             ;;
     esac

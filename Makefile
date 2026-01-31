@@ -5,7 +5,7 @@ else
 PY=$(VENV)/bin/python
 endif
 
-.PHONY: venv install start test docker-up docker-build lint help devhost-url devhost-open devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info devhost-status-json completions-zsh completions-bash windows-setup
+.PHONY: venv install start test docker-up docker-build lint help devhost-url devhost-open devhost-list devhost-list-json devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info devhost-status-json completions-zsh completions-bash windows-setup
 
 venv:
 	python -m venv $(VENV)
@@ -35,6 +35,12 @@ devhost-url:
 
 devhost-open:
 	./devhost open
+
+devhost-list:
+	./devhost list
+
+devhost-list-json:
+	./devhost list --json
 
 devhost-validate:
 	./devhost validate
@@ -71,4 +77,4 @@ windows-setup:
 	powershell -ExecutionPolicy Bypass -File scripts\\setup-windows.ps1
 
 help:
-	@echo "Available targets: venv install start test docker-build docker-up lint devhost-url devhost-open devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info devhost-status-json completions-zsh completions-bash windows-setup"
+	@echo "Available targets: venv install start test docker-build docker-up lint devhost-url devhost-open devhost-list devhost-list-json devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info devhost-status-json completions-zsh completions-bash windows-setup"

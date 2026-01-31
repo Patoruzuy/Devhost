@@ -7,6 +7,7 @@ fi
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 CONFIG="$ROOT_DIR/devhost.json"
 CADDYFILE="$ROOT_DIR/caddy/Caddyfile"
+DOMAIN_FILE="$ROOT_DIR/.devhost/domain"
 PYTHON_BIN=""
 if command -v python3 &> /dev/null; then
     PYTHON_BIN="python3"
@@ -90,6 +91,34 @@ normalize_target() {
     echo "${scheme} ${host} ${port}"
 }
 
+get_domain() {
+    if [ -n "${DEVHOST_DOMAIN:-}" ]; then
+        echo "$DEVHOST_DOMAIN" | tr -d ' \t\r\n'
+        return 0
+    fi
+    if [ -f "$DOMAIN_FILE" ]; then
+        tr -d ' \t\r\n' < "$DOMAIN_FILE"
+        return 0
+    fi
+    echo "localhost"
+}
+
+set_domain() {
+    new_domain=$1
+    if [ -z "$new_domain" ]; then
+        echo "Usage: devhost domain <base-domain>"
+        return 1
+    fi
+    if echo "$new_domain" | grep -qE '^https?://|/'; then
+        echo "Domain must be a host name only (no scheme or path)."
+        return 1
+    fi
+    mkdir -p "$(dirname "$DOMAIN_FILE")"
+    echo "$new_domain" > "$DOMAIN_FILE"
+    echo "Domain set to $new_domain"
+    generate_caddyfile
+}
+
 get_dev_scheme() {
     value=$1
     if [[ "$value" =~ ^https:// ]]; then
@@ -98,7 +127,7 @@ get_dev_scheme() {
         echo "http"
     else
         # default dev URL scheme
-        echo "https"
+        echo "http"
     fi
 }
 
@@ -127,20 +156,23 @@ Usage: devhost <command> [args]
 
 Commands:
   add <name> <port|host:port>          Add a mapping
-  add <name> --http <port|host:port>   Force http for dev URL
+  add <name> --http <port|host:port>   Force http for dev URL (default)
   add <name> --https <port|host:port>  Force https for dev URL
   remove <name>           Remove a mapping
   list                    List mappings
-  url [name]              Print HTTPS URL; press Ctrl+O to open (interactive)
-  open [name]             Open HTTPS URL in default browser
+  list --json             List mappings as JSON
+  url [name]              Print URL; press Ctrl+O to open (interactive)
+  open [name]             Open URL in default browser
   validate                Quick config/router/DNS checks
   export caddy            Print generated Caddyfile
   edit                    Open devhost.json in $EDITOR (fallback: vi)
   resolve <name>          Show DNS resolution and port reachability
   doctor                  Deeper diagnostics (dnsmasq/systemd-resolved/Caddy)
   info                    Show this help
+  domain [name]           Show or set base domain (default: localhost)
   start|stop|status       Manage router process
   install --macos [...]   Run macOS installer
+  install --windows       Run Windows installer
 EOF
 }
 
@@ -166,31 +198,32 @@ resolve_mapping() {
         return 1
     fi
     target=$(get_port_for_name "$name")
+    base_domain=$(get_domain)
     if [ -z "$target" ]; then
-        echo "No mapping found for ${name}.localhost"
+        echo "No mapping found for ${name}.${base_domain}"
     else
         normalized=$(normalize_target "$target" || true)
         if [ -n "$normalized" ]; then
             scheme=$(echo "$normalized" | awk '{print $1}')
             host=$(echo "$normalized" | awk '{print $2}')
             port=$(echo "$normalized" | awk '{print $3}')
-            echo "${name}.localhost -> ${scheme}://${host}:${port}"
+            echo "${name}.${base_domain} -> ${scheme}://${host}:${port}"
         else
-            echo "${name}.localhost -> ${target}"
+            echo "${name}.${base_domain} -> ${target}"
         fi
     fi
 
     if command -v dig >/dev/null 2>&1; then
-        ip=$(dig +short "${name}.localhost" | head -n 1)
+        ip=$(dig +short "${name}.${base_domain}" | head -n 1)
         if [ -n "$ip" ]; then
-            echo "DNS: ${name}.localhost -> ${ip}"
+            echo "DNS: ${name}.${base_domain} -> ${ip}"
         else
             echo "DNS: unresolved"
         fi
     elif command -v getent >/dev/null 2>&1; then
-        ip=$(getent hosts "${name}.localhost" | awk '{print $1}' | head -n 1)
+        ip=$(getent hosts "${name}.${base_domain}" | awk '{print $1}' | head -n 1)
         if [ -n "$ip" ]; then
-            echo "DNS: ${name}.localhost -> ${ip}"
+            echo "DNS: ${name}.${base_domain} -> ${ip}"
         else
             echo "DNS: unresolved"
         fi
@@ -218,6 +251,16 @@ doctor() {
     echo "Root: $ROOT_DIR"
     echo "Config: $CONFIG"
     validate || true
+    base_domain=$(get_domain)
+
+    if [ "$base_domain" != "localhost" ]; then
+        if command -v dig >/dev/null 2>&1; then
+            if ! dig +short "hello.${base_domain}" | head -n 1 | grep -q '.'; then
+                echo "DNS: ${base_domain} is not resolving locally."
+                echo "Hint: add a hosts entry (e.g. 127.0.0.1 hello.${base_domain}) or configure a local DNS resolver."
+            fi
+        fi
+    fi
 
     if command -v systemctl >/dev/null 2>&1; then
         if systemctl is-active --quiet caddy; then
@@ -252,8 +295,9 @@ doctor() {
 
 generate_caddyfile() {
     # generate project-local Caddyfile and a user-level Caddyfile if present
+    domain=$(get_domain)
     echo "# Autogenerated Caddyfile" > "$CADDYFILE"
-    echo "*.localhost {" >> "$CADDYFILE"
+    echo "*.${domain} {" >> "$CADDYFILE"
     echo "    reverse_proxy localhost:5555" >> "$CADDYFILE"
     echo "    tls internal" >> "$CADDYFILE"
     echo "}" >> "$CADDYFILE"
@@ -265,10 +309,10 @@ generate_caddyfile() {
         if [[ $mapcount -gt 0 ]]; then
             echo "" >> "$CADDYFILE"
             echo "# Direct mappings" >> "$CADDYFILE"
-            echo "$json" | jq -r 'to_entries[] | 
-                (if (.value|tostring|test("^http://")) then "http://"+.key+".localhost" else .key+".localhost" end) as $site
-                | $site + " {\n    reverse_proxy " + (if (.value|tostring|test("^https?://")) then (.value|tostring) elif (.value|tostring|test(":")) then (.value|tostring) else "localhost:" + (.value|tostring) end) + "\n" 
-                + (if (.value|tostring|test("^http://")) then "" else "    tls internal\n" end)
+            echo "$json" | jq -r --arg d "$domain" 'to_entries[] | 
+                (if (.value|tostring|test("^https://")) then .key+"."+$d else "http://"+.key+"."+$d end) as $site
+                | $site + " {\n    reverse_proxy " + (if (.value|tostring|test("^https?://")) then (.value|tostring) elif (.value|tostring|test(":")) then (.value|tostring) else "127.0.0.1:" + (.value|tostring) end) + "\n" 
+                + (if (.value|tostring|test("^https://")) then "    tls internal\n" else "" end)
                 + "}\n"' >> "$CADDYFILE"
         fi
     else
@@ -277,26 +321,27 @@ generate_caddyfile() {
             echo "python3 (or python) is required to render mappings without jq."
             return 1
         fi
-        "$PYTHON_BIN" - "$CONFIG" <<PY >> "$CADDYFILE"
+        "$PYTHON_BIN" - "$CONFIG" "$domain" <<PY >> "$CADDYFILE"
 import json,sys
 try:
     data=json.load(open(sys.argv[1]))
 except Exception:
     data={}
+domain = sys.argv[2] if len(sys.argv) > 2 else "localhost"
 for k,v in data.items():
     target = str(v)
-    if target.startswith("http://"):
-        print(f"http://{k}.localhost {{")
+    if target.startswith("https://"):
+        print(f"{k}.{domain} {{")
     else:
-        print(f"{k}.localhost {{")
+        print(f"http://{k}.{domain} {{")
     target = str(v)
     if target.startswith("http://") or target.startswith("https://"):
         print(f"    reverse_proxy {target}")
     elif ":" in target:
         print(f"    reverse_proxy {target}")
     else:
-        print(f"    reverse_proxy localhost:{target}")
-    if not target.startswith("http://"):
+        print(f"    reverse_proxy 127.0.0.1:{target}")
+    if target.startswith("https://"):
         print("    tls internal")
     print("}")
 PY
@@ -326,7 +371,8 @@ PY
 
 print_caddyfile() {
     echo "# Autogenerated Caddyfile"
-    echo "*.localhost {"
+    domain=$(get_domain)
+    echo "*.${domain} {"
     echo "    reverse_proxy localhost:5555"
     echo "    tls internal"
     echo "}"
@@ -337,10 +383,10 @@ print_caddyfile() {
         if [[ $mapcount -gt 0 ]]; then
             echo ""
             echo "# Direct mappings"
-            echo "$json" | jq -r 'to_entries[] | 
-                (if (.value|tostring|test("^http://")) then "http://"+.key+".localhost" else .key+".localhost" end) as $site
-                | $site + " {\n    reverse_proxy " + (if (.value|tostring|test("^https?://")) then (.value|tostring) elif (.value|tostring|test(":")) then (.value|tostring) else "localhost:" + (.value|tostring) end) + "\n" 
-                + (if (.value|tostring|test("^http://")) then "" else "    tls internal\n" end)
+            echo "$json" | jq -r --arg d "$domain" 'to_entries[] | 
+                (if (.value|tostring|test("^https://")) then .key+"."+$d else "http://"+.key+"."+$d end) as $site
+                | $site + " {\n    reverse_proxy " + (if (.value|tostring|test("^https?://")) then (.value|tostring) elif (.value|tostring|test(":")) then (.value|tostring) else "127.0.0.1:" + (.value|tostring) end) + "\n" 
+                + (if (.value|tostring|test("^https://")) then "    tls internal\n" else "" end)
                 + "}\n"'
         fi
     else
@@ -348,26 +394,27 @@ print_caddyfile() {
             echo "python3 (or python) is required to render mappings without jq."
             return 1
         fi
-        "$PYTHON_BIN" - "$CONFIG" <<PY
+        "$PYTHON_BIN" - "$CONFIG" "$domain" <<PY
 import json,sys
 try:
     data=json.load(open(sys.argv[1]))
 except Exception:
     data={}
+domain = sys.argv[2] if len(sys.argv) > 2 else "localhost"
 for k,v in data.items():
     target = str(v)
-    if target.startswith("http://"):
-        print(f"http://{k}.localhost {{")
+    if target.startswith("https://"):
+        print(f"{k}.{domain} {{")
     else:
-        print(f"{k}.localhost {{")
+        print(f"http://{k}.{domain} {{")
     target = str(v)
     if target.startswith("http://") or target.startswith("https://"):
         print(f"    reverse_proxy {target}")
     elif ":" in target:
         print(f"    reverse_proxy {target}")
     else:
-        print(f"    reverse_proxy localhost:{target}")
-    if not target.startswith("http://"):
+        print(f"    reverse_proxy 127.0.0.1:{target}")
+    if target.startswith("https://"):
         print("    tls internal")
     print("}")
 PY
@@ -397,6 +444,9 @@ add() {
         if [[ "$target" =~ ^https?:// ]]; then
             echo "Target already includes a scheme; do not combine with --http/--https"
             return 1
+        fi
+        if [[ "$target" =~ ^[0-9]+$ ]]; then
+            target="127.0.0.1:${target}"
         fi
         target="${scheme}://${target}"
     fi
@@ -462,7 +512,8 @@ PY
 )
     fi
     save_json "$new_json"
-    echo "[+] Mapped $domain.localhost to $target"
+    base_domain=$(get_domain)
+    echo "[+] Mapped $domain.${base_domain} to $target"
     generate_caddyfile
 }
 
@@ -488,25 +539,65 @@ PY
 )
     fi
     save_json "$new_json"
-    echo "[-] Removed mapping for $domain.localhost"
+    base_domain=$(get_domain)
+    echo "[-] Removed mapping for $domain.${base_domain}"
     generate_caddyfile
 }
 
 list() {
-    if command -v jq &> /dev/null; then
-        load_json | jq
-    else
-        if [ -z "$PYTHON_BIN" ]; then
-            load_json
-            return 0
-        fi
-        "$PYTHON_BIN" - "$CONFIG" <<PY
+    if [ "${1:-}" = "--json" ]; then
+        if command -v jq &> /dev/null; then
+            load_json | jq
+        else
+            if [ -z "$PYTHON_BIN" ]; then
+                load_json
+                return 0
+            fi
+            "$PYTHON_BIN" - "$CONFIG" <<PY
 import json,sys
 try:
     data=json.load(open(sys.argv[1]))
 except Exception:
     data={}
 print(json.dumps(data, indent=2, sort_keys=True))
+PY
+        fi
+        return 0
+    fi
+
+    json=$(load_json)
+    domain=$(get_domain)
+    if command -v jq &> /dev/null; then
+        count=$(echo "$json" | jq 'length')
+        if [ "$count" -eq 0 ]; then
+            echo "No mappings yet. Add one with: devhost add <name> <port>"
+            return 0
+        fi
+        echo "$json" | jq -r --arg d "$domain" '
+            to_entries[] | 
+            (.value|tostring) as $v |
+            "\(.key)."+$d+" -> "+(if $v|test("^[0-9]+$") then "127.0.0.1:"+$v else $v end)
+        '
+    else
+        if [ -z "$PYTHON_BIN" ]; then
+            echo "No mappings yet. Add one with: devhost add <name> <port>"
+            return 0
+        fi
+        "$PYTHON_BIN" - "$CONFIG" "$domain" <<PY
+import json,sys
+domain=sys.argv[2]
+try:
+    data=json.load(open(sys.argv[1]))
+except Exception:
+    data={}
+if not data:
+    print("No mappings yet. Add one with: devhost add <name> <port>")
+else:
+    for k,v in data.items():
+        s=str(v)
+        if s.isdigit():
+            s=f"127.0.0.1:{s}"
+        print(f"{k}.{domain} -> {s}")
 PY
     fi
 }
@@ -522,17 +613,19 @@ url() {
     fi
     target=$(get_port_for_name "$name")
     if [ -z "$target" ]; then
-        echo "No mapping found for ${name}.localhost"
+        base_domain=$(get_domain)
+        echo "No mapping found for ${name}.${base_domain}"
         return 1
     fi
+    base_domain=$(get_domain)
     scheme=$(get_dev_scheme "$target")
-    echo "${scheme}://${name}.localhost"
+    echo "${scheme}://${name}.${base_domain}"
     # Optional: open when Ctrl+O is pressed (interactive only)
     if [ -t 0 ]; then
         read -r -n 1 -s -p "Press Ctrl+O to open in browser, any other key to skip... " key
         echo
         if [ "$key" = $'\x0f' ]; then
-            open_in_browser "${scheme}://${name}.localhost"
+            open_in_browser "${scheme}://${name}.${base_domain}"
         fi
     fi
 }
@@ -548,11 +641,13 @@ open_cmd() {
     fi
     target=$(get_port_for_name "$name")
     if [ -z "$target" ]; then
-        echo "No mapping found for ${name}.localhost"
+        base_domain=$(get_domain)
+        echo "No mapping found for ${name}.${base_domain}"
         return 1
     fi
+    base_domain=$(get_domain)
     scheme=$(get_dev_scheme "$target")
-    open_in_browser "${scheme}://${name}.localhost"
+    open_in_browser "${scheme}://${name}.${base_domain}"
 }
 
 validate() {
@@ -590,18 +685,19 @@ PY
     fi
 
     name=$(first_mapping_name)
+    base_domain=$(get_domain)
     if [ -n "$name" ]; then
         if command -v dig >/dev/null 2>&1; then
-            if dig +short "${name}.localhost" | grep -q '127.0.0.1'; then
-                echo "DNS: OK (${name}.localhost -> 127.0.0.1)"
+            if dig +short "${name}.${base_domain}" | grep -q '127.0.0.1'; then
+                echo "DNS: OK (${name}.${base_domain} -> 127.0.0.1)"
             else
-                echo "DNS: unresolved for ${name}.localhost"
+                echo "DNS: unresolved for ${name}.${base_domain}"
             fi
         elif command -v getent >/dev/null 2>&1; then
-            if getent hosts "${name}.localhost" | grep -q '127.0.0.1'; then
-                echo "DNS: OK (${name}.localhost -> 127.0.0.1)"
+            if getent hosts "${name}.${base_domain}" | grep -q '127.0.0.1'; then
+                echo "DNS: OK (${name}.${base_domain} -> 127.0.0.1)"
             else
-                echo "DNS: unresolved for ${name}.localhost"
+                echo "DNS: unresolved for ${name}.${base_domain}"
             fi
         else
             echo "DNS: dig/getent not available"
@@ -776,13 +872,20 @@ status() {
 case "$1" in
     add) add "${@:2}" ;;
     remove) remove $2 ;;
-    list) list ;;
+    list) list "${@:2}" ;;
     url) url $2 ;;
     open) open_cmd $2 ;;
     validate) validate ;;
     edit) edit_config ;;
     resolve) resolve_mapping $2 ;;
     doctor) doctor ;;
+    domain)
+        if [ -n "${2:-}" ]; then
+            set_domain "$2"
+        else
+            get_domain
+        fi
+        ;;
     info|help|-h|--help) print_usage ;;
     export)
         if [[ "$2" == "caddy" ]]; then

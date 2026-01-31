@@ -11,18 +11,42 @@ from urllib.parse import urlparse
 app = FastAPI()
 
 
-def extract_subdomain(host_header: Optional[str]) -> Optional[str]:
+def load_domain() -> str:
+    env_domain = os.getenv("DEVHOST_DOMAIN")
+    if env_domain:
+        return env_domain.strip().lower()
+    here = Path(__file__).resolve()
+    candidates = [
+        Path.cwd() / ".devhost" / "domain",
+        here.parent.parent / ".devhost" / "domain",
+        here.parent / ".devhost" / "domain",
+    ]
+    for path in candidates:
+        try:
+            if path.is_file():
+                value = path.read_text().strip().lower()
+                if value:
+                    return value
+        except Exception:
+            continue
+    return "localhost"
+
+
+def extract_subdomain(host_header: Optional[str], base_domain: Optional[str] = None) -> Optional[str]:
     if not host_header:
+        return None
+    base_domain = (base_domain or load_domain()).strip(".").lower()
+    if not base_domain:
         return None
     # strip port if present
     host_only = host_header.split(":")[0].strip().lower()
-    if not host_only.endswith(".localhost"):
+    suffix = f".{base_domain}"
+    if not host_only.endswith(suffix):
         return None
-    parts = host_only.split(".")
-    if len(parts) < 2:
+    sub = host_only[: -len(suffix)]
+    if not sub:
         return None
-    # return everything before ".localhost"
-    return ".".join(parts[:-1])
+    return sub
 
 
 def _config_candidates() -> list[Path]:
@@ -97,14 +121,15 @@ async def wildcard_proxy(request: Request, full_path: str):
     routes = load_routes()
 
     host_header = request.headers.get("host", "")
-    subdomain = extract_subdomain(host_header)
+    base_domain = load_domain()
+    subdomain = extract_subdomain(host_header, base_domain)
     if not subdomain:
         return JSONResponse({"error": "Missing or invalid Host header"}, status_code=400)
 
     target_value = routes.get(subdomain)
     target = parse_target(target_value)
     if not target:
-        return JSONResponse({"error": f"No route found for {subdomain}.localhost"}, status_code=404)
+        return JSONResponse({"error": f"No route found for {subdomain}.{base_domain}"}, status_code=404)
     target_scheme, target_host, target_port = target
 
     # build upstream URL and preserve query string

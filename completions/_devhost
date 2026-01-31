@@ -6,18 +6,19 @@ _devhost() {
     "add:Add a mapping"
     "remove:Remove a mapping"
     "list:List mappings"
-    "url:Print HTTPS URL (Ctrl+O to open)"
-    "open:Open HTTPS URL"
+    "url:Print URL (Ctrl+O to open)"
+    "open:Open URL"
     "validate:Quick health checks"
     "export:Print generated Caddyfile"
     "edit:Open devhost.json in editor"
     "resolve:Show DNS and port reachability"
     "doctor:Deeper diagnostics"
     "info:Show help"
+    "domain:Show or set base domain"
     "start:Start router"
     "stop:Stop router"
     "status:Router status"
-    "install:Run macOS installer"
+    "install:Run installer"
   )
 
   _describe -t commands 'devhost commands' commands
@@ -48,11 +49,17 @@ PY
     add)
       _arguments '1:option:(--http --https)'
       ;;
+    list)
+      _arguments '*:option:(--json)'
+      ;;
     export)
       _arguments '1:subcommand:(caddy)'
       ;;
     status)
       _arguments '*:option:(--json)'
+      ;;
+    install)
+      _arguments '1:option:(--macos --windows)'
       ;;
   esac
 }

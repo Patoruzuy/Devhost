@@ -41,7 +41,12 @@ class DummyAsyncClient:
 
 class RouterTests(unittest.TestCase):
     def setUp(self):
+        self.env_patch = patch.dict(os.environ, {"DEVHOST_DOMAIN": "localhost"}, clear=False)
+        self.env_patch.start()
         self.client = TestClient(app)
+
+    def tearDown(self):
+        self.env_patch.stop()
 
     def _write_config(self, data):
         tmp = tempfile.NamedTemporaryFile("w", delete=False)
@@ -57,6 +62,11 @@ class RouterTests(unittest.TestCase):
         self.assertIsNone(extract_subdomain("example.com"))
         self.assertIsNone(extract_subdomain(""))
         self.assertIsNone(extract_subdomain(None))
+
+    def test_extract_subdomain_custom_domain(self):
+        with patch.dict(os.environ, {"DEVHOST_DOMAIN": "flask"}, clear=False):
+            self.assertEqual(extract_subdomain("hello.flask"), "hello")
+            self.assertIsNone(extract_subdomain("hello.localhost"))
 
     def test_invalid_host_header(self):
         resp = self.client.get("/", headers={"host": "example.com"})
