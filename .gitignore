@@ -1,6 +1,4 @@
 *.ps1
-!devhost.ps1
-!scripts/setup-windows.ps1
 .devhost/
 devhost.json
 caddy/Caddyfile

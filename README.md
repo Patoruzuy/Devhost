@@ -37,7 +37,7 @@ devhost remove hello
 
 Visit `hello.localhost` in your browser.
 
-Note: the `devhost` CLI is now implemented in Python (cross-platform). The prior bash script is kept as `devhost.sh` for reference during the migration.
+Note: the `devhost` CLI is implemented in Python (cross-platform).
 
 Cross-platform installer (uses the Python CLI):
 
@@ -61,7 +61,7 @@ To change the base domain (for example, `hello.flask`), set it once and re-run y
 
 ```bash
 devhost domain flask
-./install.sh --domain flask
+python install.py --domain flask
 ```
 
 Run the router locally (development):
@@ -85,7 +85,7 @@ docker compose up --build -d
 
 Notes & safety
 
-- `install.sh` is Debian/Ubuntu-oriented and will prompt you about DNS changes. Review DNS/resolver changes before applying them on systems using `systemd-resolved`.
+- `install.py` handles Linux/macOS/Windows and will prompt you about DNS changes. Review DNS/resolver changes before applying them on systems using `systemd-resolved`.
 - We now generate the project `caddy/Caddyfile`, the user `~/.config/caddy/Caddyfile`, and (if present) `/etc/caddy/Caddyfile` to keep system Caddy installs in sync.
 - The router loads `devhost.json` per request so CLI changes take effect immediately without restarting the router.
 
@@ -193,8 +193,8 @@ Troubleshooting
 
 Platform notes
 
-- `install.sh` targets Debian/Ubuntu systems; it reads `DEVHOST_DOMAIN` or `.devhost/domain` to configure DNS for the base domain.
-- Windows setup is supported via `scripts/setup-windows.ps1` (see below). If you change the base domain on Windows, run PowerShell as Administrator so Devhost can add hosts entries automatically, or use a local DNS resolver (Acrylic) for wildcard domains.
+- `install.py` targets Linux/macOS/Windows; it reads `DEVHOST_DOMAIN` or `.devhost/domain` to configure DNS for the base domain.
+- On Windows, run the installer from an elevated PowerShell if you want hosts entries updated automatically, or use a local DNS resolver (Acrylic) for wildcard domains.
 
 Release notes
 
@@ -202,73 +202,42 @@ See `CHANGELOG.md` for the v1.0.0 release notes.
 
 macOS installer
 
-- An interactive installer script is available at `scripts/setup-macos.sh`. It generates a LaunchAgent plist from `router/devhost-router.plist.tmpl`, creates `/etc/resolver/<domain>` pointing to `127.0.0.1`, and can optionally start `dnsmasq` via Homebrew and load the LaunchAgent.
-- The installer accepts either a uvicorn binary path or `python3 -m uvicorn` and generates a valid LaunchAgent accordingly.
-- The installer can optionally install shell completions to `~/.zsh/completions` and `~/.bash_completion.d`.
-
-Usage examples:
+Run the Python installer to generate the LaunchAgent plist (from `router/devhost-router.plist.tmpl`), create `/etc/resolver/<domain>`, and optionally start `dnsmasq` via Homebrew:
 
 ```bash
 # dry-run (print actions)
-bash scripts/setup-macos.sh --dry-run
+python install.py --macos --dry-run
 
 # run interactively (will prompt for username and uvicorn path)
-bash scripts/setup-macos.sh
+python install.py --macos
 ```
 
-The script will prompt before making system changes and backs up any existing plist file it replaces.
-
-Non-interactive example
-
-You can run the installer non-interactively (accept all prompts and start dnsmasq if available) with:
+Non-interactive example (accept all prompts and start dnsmasq if available):
 
 ```bash
-# from repo root
-devhost install --macos --yes
-# or directly
-bash scripts/setup-macos.sh --yes
-```
-
-If you want the script to also start dnsmasq automatically, pass `--start-dns`:
-
-```bash
-devhost install --macos --yes --start-dns
+python install.py --macos --yes --start-dns
 ```
 
 To use a custom base domain on macOS:
 
 ```bash
 devhost domain flask
-devhost install --macos --domain flask
+python install.py --macos --domain flask
 ```
 
 Windows installer
 
-Run the PowerShell setup script from Windows to prepare the venv, router deps, and initial config:
+Run the Python installer from PowerShell to prepare the venv, router deps, and initial config:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\setup-windows.ps1
+python .\install.py --windows --caddy
+python .\devhost add hello 8000
 ```
 
 To clean and reinstall:
 
 ```powershell
-.\scripts\setup-windows.ps1 -Clean
-```
-
-The Windows installer prints next-step instructions for installing Caddy and running the router.
-You can run the CLI from Windows PowerShell using the shim:
-
-```powershell
-.\devhost.ps1 add hello 8000
-```
-
-If you prefer the Python CLI, you can run:
-
-```powershell
-python .\devhost install --windows --caddy
-python .\devhost add hello 8000
+python .\install.py --windows --clean
 ```
 
 Note: the router requires a Host header. Don’t browse `http://127.0.0.1:5555` directly — use `devhost open <name>` or:

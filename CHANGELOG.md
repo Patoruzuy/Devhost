@@ -33,5 +33,8 @@ Semantic Versioning.
 - `devhost` now generates Caddyfiles and manages hosts entries from Python.
 - README updated for the Python CLI and installer usage.
 
+### Removed
+- Legacy installers and shims (`install.sh`, `setup-macos.sh`, `setup-windows.ps1`, `devhost.ps1`, `devhost.sh`).
+
 ### Notes
 - See `README.md` for setup and usage instructions.
