@@ -46,11 +46,41 @@ app.include_router(create_proxy_router())
 
 **Run:** `python examples/example_full_integration.py`
 
+### 5. Flask WSGI Integration (`example_flask.py`)
+Add Devhost routing to your Flask application:
+
+```python
+from devhost_cli.middleware.wsgi import DevhostWSGIMiddleware
+from flask import Flask
+
+app = Flask(__name__)
+app.wsgi_app = DevhostWSGIMiddleware(app.wsgi_app)
+```
+
+**Run:** `python examples/example_flask.py`
+
+### 6. Django WSGI Integration (`example_django.py`)
+Add Devhost routing to your Django application:
+
+```python
+from devhost_cli.middleware.wsgi import DevhostWSGIMiddleware
+from django.core.wsgi import get_wsgi_application
+
+application = get_wsgi_application()
+application = DevhostWSGIMiddleware(application)
+```
+
+**Run:** `python examples/example_django.py`
+
 ## Setup
 
 ```bash
-# Install devhost
+# Install devhost with ASGI support
 pip install devhost
+
+# Or with Flask/Django support
+pip install devhost[flask]    # Flask
+pip install devhost[django]   # Django
 
 # Run any example
 python examples/example_factory.py
@@ -66,10 +96,12 @@ devhost add api 8000
 
 ## Features Demonstrated
 
-- ✅ Subdomain routing
+- ✅ Subdomain routing (ASGI & WSGI)
 - ✅ Proxy functionality  
 - ✅ Health checks
 - ✅ Route management endpoints
-- ✅ Custom middleware integration
-- ✅ Factory pattern usage
+- ✅ Custom middleware integration (ASGI & WSGI)
+- ✅ Factory pattern usage (ASGI)
 - ✅ Mixed custom + proxy routes
+- ✅ Flask integration (WSGI)
+- ✅ Django integration (WSGI)

@@ -1,14 +1,14 @@
 [project]
 name = "devhost"
-version = "2.1.6"
-description = "Lightweight local development domain router with ASGI middleware support"
+version = "2.2.0"
+description = "Lightweight local development domain router with ASGI and WSGI middleware support"
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
     {name = "Sebastian Gomez"}
 ]
-keywords = ["development", "proxy", "router", "subdomain", "local", "middleware", "fastapi", "asgi"]
+keywords = ["development", "proxy", "router", "subdomain", "local", "middleware", "fastapi", "asgi", "wsgi", "flask", "django"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -17,6 +17,8 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Framework :: FastAPI",
+    "Framework :: Flask",
+    "Framework :: Django",
     "Topic :: Internet :: Proxy Servers",
     "Topic :: Software Development",
 ]
@@ -25,12 +27,19 @@ dependencies = [
     "fastapi ~= 0.110",
     "uvicorn ~= 0.29",
     "httpx ~= 0.27",
+    "requests ~= 2.31",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest ~= 8.0",
     "ruff ~= 0.14.14",
+]
+flask = [
+    "flask ~= 3.0",
+]
+django = [
+    "django ~= 5.0",
 ]
 
 [project.urls]

@@ -41,12 +41,13 @@ python install.py --linux  # or --macos, --windows
 
 - **CLI Tool**: Map subdomains to ports (e.g., `app.localhost` → `localhost:1234`)
 - **Custom Base Domain**: Change from `localhost` to anything (e.g., `app.flask`, `api.devhost`)
-- **ASGI Middleware**: Embed subdomain routing in FastAPI/Starlette apps
+- **ASGI Middleware**: Embed subdomain routing in FastAPI/Flask/Django/Starlette apps
 - **Remote Network Devices**: Map to any IP on your network (e.g., `rpi.localhost` → `192.168.1.100:8080`)
 - **HTTPS Support**: Via Caddy's internal CA (use `--https`)
 - **Cross-Platform**: Works on macOS, Linux, and Windows
 - **Hot Reload**: Changes take effect immediately without restart
 - **Factory Functions**: Easy integration with existing FastAPI apps
+- **Flask & Django Support**: Production-ready WSGI middleware (v2.2+)
 
 ## Use Cases
 
@@ -62,7 +63,7 @@ devhost list
 
 ### 2. ASGI Middleware (New in v2.1+)
 
-Embed Devhost routing directly in your FastAPI application:
+Embed Devhost routing directly in your FastAPI/Starlette application:
 
 ```python
 from fastapi import FastAPI
@@ -72,11 +73,40 @@ app = FastAPI()
 app.add_middleware(DevhostMiddleware)
 
 @app.get("/")
-def read_root():
+async def read_root():
     return {"message": "Hello from FastAPI with Devhost routing!"}
 ```
 
-### 3. Factory Functions
+### 3. WSGI Middleware (New in v2.2+)
+
+Embed Devhost routing in your Flask or Django application:
+
+**Flask:**
+```python
+from flask import Flask
+from devhost_cli.middleware.wsgi import DevhostWSGIMiddleware
+
+app = Flask(__name__)
+app.wsgi_app = DevhostWSGIMiddleware(app.wsgi_app)
+
+@app.route("/")
+def index():
+    return {"message": "Hello from Flask with Devhost routing!"}
+```
+
+**Django:**
+```python
+# In your wsgi.py file
+from devhost_cli.middleware.wsgi import DevhostWSGIMiddleware
+from django.core.wsgi import get_wsgi_application
+
+application = get_wsgi_application()
+application = DevhostWSGIMiddleware(application)
+```
+
+### 4. Factory Function (ASGI)
+
+Quick ASGI app setup with built-in routing:
 
 Create a complete Devhost-enabled app with one function:
 

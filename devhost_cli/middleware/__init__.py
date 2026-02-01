@@ -1,3 +1,3 @@
 """Devhost middleware package."""
 
-__all__ = ["asgi"]
+__all__ = ["asgi", "wsgi"]

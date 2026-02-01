@@ -27,6 +27,7 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f router/requirements.txt ]; then pip install -r router/requirements.txt; fi
           pip install ruff==0.14.14
+          pip install -e .[dev]
 
       - name: Run Python syntax checks (compile)
         run: |
