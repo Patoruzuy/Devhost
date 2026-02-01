@@ -23,17 +23,15 @@ class DevhostMiddleware:
         app.add_middleware(DevhostMiddleware)
     """
 
-    def __init__(self, app: Callable, config_path: str | None = None):
+    def __init__(self, app: Callable):
         """
         Initialize the middleware.
 
         Args:
             app: ASGI application callable
-            config_path: Optional path to devhost.json config file
         """
         self.app = app
         self.route_cache = RouteCache()
-        self.config_path = config_path
 
     async def __call__(self, scope: dict, receive: Callable, send: Callable):
         """

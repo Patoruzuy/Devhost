@@ -77,11 +77,12 @@ class RouteCache:
         """
         path = _select_config_path()
         if not path:
-            if self._routes:
-                logger.info("Config file not found; clearing routes cache.")
-                self._routes = {}
-                self._last_mtime = 0.0
-                self._last_path = None
+            async with self._lock:
+                if self._routes:
+                    logger.info("Config file not found; clearing routes cache.")
+                    self._routes = {}
+                    self._last_mtime = 0.0
+                    self._last_path = None
             return {}
         try:
             mtime = path.stat().st_mtime

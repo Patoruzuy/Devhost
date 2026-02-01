@@ -56,7 +56,7 @@ def extract_subdomain(host_header: str | None, base_domain: str | None = None) -
     return sub
 
 
-def parse_target(value) -> tuple[str, int, str] | None:
+def parse_target(value) -> tuple[str, str, int] | None:
     """
     Parse a target value into (scheme, host, port) tuple.
 

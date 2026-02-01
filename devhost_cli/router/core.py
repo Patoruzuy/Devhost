@@ -12,6 +12,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
+from devhost_cli import __version__
 from devhost_cli.router.cache import RouteCache
 from devhost_cli.router.metrics import Metrics
 from devhost_cli.router.utils import extract_subdomain, load_domain, parse_target
@@ -79,7 +80,7 @@ def create_app() -> FastAPI:
         return JSONResponse(
             {
                 "status": "ok",
-                "version": "v1.0.0",
+                "version": __version__,
                 "routes_count": len(routes),
                 "uptime_seconds": int(time.time() - metrics.start_time),
             }

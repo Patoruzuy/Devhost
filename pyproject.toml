@@ -12,6 +12,7 @@ keywords = ["development", "proxy", "router", "subdomain", "local", "middleware"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -34,10 +35,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/devhost"
-Documentation = "https://github.com/yourusername/devhost#readme"
-Repository = "https://github.com/yourusername/devhost"
-Issues = "https://github.com/yourusername/devhost/issues"
+Homepage = "https://github.com/Patoruzuy/devhost"
+Documentation = "https://github.com/Patoruzuy/devhost#readme"
+Repository = "https://github.com/Patoruzuy/devhost"
+Issues = "https://github.com/Patoruzuy/devhost/issues"
 
 [project.scripts]
 devhost = "devhost_cli.main:main"

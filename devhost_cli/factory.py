@@ -10,15 +10,12 @@ from devhost_cli.middleware import DevhostMiddleware
 from devhost_cli.router import create_app
 
 
-def create_devhost_app(config_path: str | None = None) -> FastAPI:
+def create_devhost_app() -> FastAPI:
     """
     Create a standalone Devhost router application.
 
     This creates a complete FastAPI application that acts as a reverse proxy,
     routing requests based on subdomain to configured local services.
-
-    Args:
-        config_path: Optional path to devhost.json config file
 
     Returns:
         Configured FastAPI application
@@ -33,7 +30,7 @@ def create_devhost_app(config_path: str | None = None) -> FastAPI:
     return create_app()
 
 
-def enable_subdomain_routing(app: FastAPI | Callable, config_path: str | None = None) -> FastAPI | Callable:
+def enable_subdomain_routing(app: FastAPI | Callable) -> FastAPI | Callable:
     """
     Enable subdomain routing for an existing ASGI application.
 
@@ -42,7 +39,6 @@ def enable_subdomain_routing(app: FastAPI | Callable, config_path: str | None = 
 
     Args:
         app: ASGI application (FastAPI, Starlette, etc.)
-        config_path: Optional path to devhost.json config file
 
     Returns:
         The same application with middleware added
@@ -61,21 +57,18 @@ def enable_subdomain_routing(app: FastAPI | Callable, config_path: str | None = 
     """
     if hasattr(app, "add_middleware"):
         # FastAPI/Starlette
-        app.add_middleware(DevhostMiddleware, config_path=config_path)
+        app.add_middleware(DevhostMiddleware)
     else:
         # Generic ASGI app - wrap it
-        return DevhostMiddleware(app, config_path=config_path)
+        return DevhostMiddleware(app)
     return app
 
 
-def create_proxy_router(config_path: str | None = None) -> FastAPI:
+def create_proxy_router() -> FastAPI:
     """
     Create a proxy router application (alias for create_devhost_app).
-
-    Args:
-        config_path: Optional path to devhost.json config file
 
     Returns:
         Configured FastAPI proxy application
     """
-    return create_devhost_app(config_path)
+    return create_devhost_app()
