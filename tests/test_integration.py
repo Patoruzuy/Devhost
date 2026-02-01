@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -162,13 +163,7 @@ class TestCLIIntegration(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Cleanup temp files"""
-        if cls.test_config.exists():
-            cls.test_config.unlink()
-        if cls.test_domain_file.exists():
-            cls.test_domain_file.unlink()
-        if cls.test_domain_dir.exists():
-            cls.test_domain_dir.rmdir()
-        Path(cls.temp_dir).rmdir()
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
 
     def _run_devhost(self, *args):
         """Run devhost CLI command"""
