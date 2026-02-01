@@ -6,10 +6,10 @@ This demonstrates using Devhost middleware with Starlette applications.
 Usage:
     # Install devhost (core package)
     pip install devhost
-    
+
     # Install Starlette separately (optional integration dependency)
     pip install starlette
-    
+
     # Run the example
     python examples/example_starlette.py
 """
