@@ -18,6 +18,7 @@ Usage:
 """
 
 import uvicorn
+
 from devhost_cli.factory import create_devhost_app
 
 # Create a complete Devhost-enabled FastAPI app
@@ -39,5 +40,5 @@ if __name__ == "__main__":
     print("  GET /mappings - Routes with health status")
     print("  GET /custom - Custom endpoint")
     print("\nConfigure routes with: devhost add <name> <port>")
-    
+
     uvicorn.run(app, host="127.0.0.1", port=5555)

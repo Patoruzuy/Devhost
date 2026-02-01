@@ -16,6 +16,7 @@ Usage:
 
 import uvicorn
 from fastapi import FastAPI, Request
+
 from devhost_cli.middleware.asgi import DevhostMiddleware
 
 # Create your FastAPI app as usual
@@ -30,7 +31,7 @@ async def root(request: Request):
     """Root endpoint with subdomain information"""
     # Access Devhost info from request scope
     devhost_info = request.scope.get("devhost", {})
-    
+
     return {
         "message": "Hello from FastAPI with Devhost!",
         "subdomain": devhost_info.get("subdomain"),
@@ -59,5 +60,5 @@ if __name__ == "__main__":
     print("  GET /health - Health check")
     print("\nConfigure routes with: devhost add <name> <port>")
     print("Then access at: http://<name>.localhost")
-    
+
     uvicorn.run(app, host="127.0.0.1", port=8000)

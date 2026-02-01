@@ -87,7 +87,7 @@ from devhost_cli.factory import create_devhost_app
 app = create_devhost_app()
 ```
 
-See [examples/](examples/) for more integration patterns.
+**More examples:** [View all integration patterns on GitHub →](https://github.com/Patoruzuy/Devhost/tree/main/examples)
 
 ## Custom Base Domains
 

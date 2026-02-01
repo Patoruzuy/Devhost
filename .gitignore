@@ -40,3 +40,9 @@ devhost_cli/__pycache__/
 
 
 ROADMAP.md
+devhost.egg-info/dependency_links.txt
+devhost.egg-info/entry_points.txt
+devhost.egg-info/PKG-INFO
+devhost.egg-info/requires.txt
+devhost.egg-info/SOURCES.txt
+devhost.egg-info/top_level.txt
