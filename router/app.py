@@ -367,7 +367,9 @@ async def wildcard_proxy(request: Request, full_path: str):
             )
         except httpx.RequestError as exc:
             request_id = str(uuid.uuid4())[:8]
-            logger.warning("[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc)
+            logger.warning(
+                "[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc
+            )
             return JSONResponse({"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502)
 
     # Filter hop-by-hop headers

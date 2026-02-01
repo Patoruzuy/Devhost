@@ -1,4 +1,5 @@
 """Tests for validation module"""
+
 import unittest
 
 from devhost_cli.validation import parse_target, validate_ip, validate_name, validate_port
