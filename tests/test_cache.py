@@ -77,7 +77,7 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
         from unittest.mock import patch
 
         # Mock _select_config_path to return None (no config found)
-        with patch('devhost_cli.router.cache._select_config_path', return_value=None):
+        with patch("devhost_cli.router.cache._select_config_path", return_value=None):
             cache = RouteCache()
             routes = await cache.get_routes()
             self.assertEqual(routes, {})
