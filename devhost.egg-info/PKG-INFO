@@ -1,3 +1,34 @@
+Metadata-Version: 2.4
+Name: devhost
+Version: 2.1.0
+Summary: Lightweight local development domain router with ASGI middleware support
+Author: Devhost Contributors
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/yourusername/devhost
+Project-URL: Documentation, https://github.com/yourusername/devhost#readme
+Project-URL: Repository, https://github.com/yourusername/devhost
+Project-URL: Issues, https://github.com/yourusername/devhost/issues
+Keywords: development,proxy,router,subdomain,local,middleware,fastapi,asgi
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Framework :: FastAPI
+Classifier: Topic :: Internet :: Proxy Servers
+Classifier: Topic :: Software Development
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: fastapi~=0.110
+Requires-Dist: uvicorn~=0.29
+Requires-Dist: httpx~=0.27
+Provides-Extra: dev
+Requires-Dist: pytest~=8.0; extra == "dev"
+Requires-Dist: ruff~=0.7; extra == "dev"
+Dynamic: license-file
+
 
 
 # 🌐 Devhost
