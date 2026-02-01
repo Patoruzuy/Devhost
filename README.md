@@ -32,6 +32,7 @@ Devhost allows you to map subdomains of a base domain (default: `localhost`, e.g
 
 ```bash
 git clone https://github.com/Patoruzuy/devhost.git
+cd devhost
 python install.py --linux
 devhost add hello 3000
 devhost list
