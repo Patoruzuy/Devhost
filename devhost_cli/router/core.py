@@ -9,12 +9,12 @@ import time
 import uuid
 
 import httpx
+from devhost_cli.router.metrics import Metrics
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from devhost_cli import __version__
 from devhost_cli.router.cache import RouteCache
-from devhost_cli.router.metrics import Metrics
 from devhost_cli.router.utils import extract_subdomain, load_domain, parse_target
 
 # Configure logging
