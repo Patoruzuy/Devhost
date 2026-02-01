@@ -4,20 +4,89 @@
 
 ![CI](https://github.com/Patoruzuy/Devhost/actions/workflows/ci.yml/badge.svg)
 ![Release](https://img.shields.io/github/v/release/Patoruzuy/Devhost)
+![PyPI](https://img.shields.io/pypi/v/devhost)
+![Python](https://img.shields.io/pypi/pyversions/devhost)
 
 **Secure, flexible local domain routing for developers.**
 
 Devhost allows you to map subdomains of a base domain (default: `localhost`, e.g. `myapp.localhost`) to local app ports, with optional HTTPS and wildcard routing via Caddy and a Python backend.
 
+## Installation
+
+### PyPI Package (Recommended)
+
+```bash
+pip install devhost
+```
+
+After installation, use the `devhost` CLI directly:
+
+```bash
+devhost add hello 3000
+devhost list
+devhost open hello
+```
+
+### Git Clone (Development)
+
+For development or customization:
+
+```bash
+git clone https://github.com/Patoruzuy/devhost.git
+cd devhost
+python install.py --linux  # or --macos, --windows
+```
+
 ## Features
 
-- Map domains like `app.localhost` → `localhost:1234`
-- Map domains to remote IPs (e.g. `rpi.localhost` → `192.168.1.100:8080`)
-- HTTPS support via Caddy's internal CA (use `--https`)
-- Add/remove routes using a single CLI command
-- Wildcard reverse proxy using Python (FastAPI)
-- Custom base domain (e.g. `hello.flask`)
-- Supports macOS, Linux, and Windows (native PowerShell shim)
+- **CLI Tool**: Map domains like `app.localhost` → `localhost:1234`
+- **ASGI Middleware**: Embed subdomain routing in FastAPI/Starlette apps
+- **Remote IPs**: Map to devices on your network (e.g. `rpi.localhost` → `192.168.1.100:8080`)
+- **HTTPS Support**: Via Caddy's internal CA (use `--https`)
+- **Cross-Platform**: Works on macOS, Linux, and Windows
+- **Hot Reload**: Changes take effect immediately without restart
+- **Factory Functions**: Easy integration with existing FastAPI apps
+
+## Use Cases
+
+### 1. CLI Tool (Traditional Usage)
+
+Manage local development domains from the command line:
+
+```bash
+devhost add api 8000
+devhost add frontend 3000
+devhost list
+```
+
+### 2. ASGI Middleware (New in v2.1+)
+
+Embed Devhost routing directly in your FastAPI application:
+
+```python
+from fastapi import FastAPI
+from devhost_cli.middleware.asgi import DevhostMiddleware
+
+app = FastAPI()
+app.add_middleware(DevhostMiddleware)
+
+@app.get("/")
+def read_root():
+    return {"message": "Hello from FastAPI with Devhost routing!"}
+```
+
+### 3. Factory Functions
+
+Create a complete Devhost-enabled app with one function:
+
+```python
+from devhost_cli.factory import create_devhost_app
+
+# Creates FastAPI app with subdomain routing + proxy endpoints
+app = create_devhost_app()
+```
+
+See [examples/](examples/) for more integration patterns.
 
 ## Benefits for Devs
 
@@ -28,7 +97,23 @@ Devhost allows you to map subdomains of a base domain (default: `localhost`, e.g
 
 ## Quickstart
 
-### 1. Clone the project
+**Install via pip:**
+
+```bash
+pip install devhost
+```
+
+**Add your first route:**
+
+```bash
+devhost add hello 3000
+devhost list
+devhost open hello
+```
+
+Visit `hello.localhost` in your browser.
+
+### From Source (Development)
 
 ```bash
 git clone https://github.com/Patoruzuy/devhost.git
@@ -38,8 +123,6 @@ devhost add hello 3000
 devhost list
 devhost remove hello
 ```
-
-Visit `hello.localhost` in your browser.
 
 Note: the `devhost` CLI is implemented in Python (cross-platform).
 
