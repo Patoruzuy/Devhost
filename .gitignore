@@ -14,6 +14,13 @@ router/venv/
 router/.venv/
 .env
 
+# Package build artifacts
+*.egg-info/
+dist/
+build/
+*.whl
+*.tar.gz
+
 # SQLite
 *.db
 
@@ -37,3 +44,6 @@ devhost.legacy
 __pycache__/
 *.pyc
 devhost_cli/__pycache__/
+.github/PUBLISHING.md
+ROADMAP.md
+PHASE5-PLAN.md

@@ -10,7 +10,7 @@ from pathlib import Path
 from .caddy import edit_config, generate_caddyfile, print_caddyfile
 from .config import Config
 from .platform import IS_WINDOWS, is_admin
-from .router import Router
+from .router_process import RouterProcess
 from .utils import Colors, msg_error, msg_info, msg_step, msg_success, msg_warning
 from .validation import get_dev_scheme, parse_target, validate_name
 from .windows import hosts_add, hosts_remove
@@ -64,7 +64,7 @@ class DevhostCLI:
 
     def __init__(self):
         self.config = Config()
-        self.router = Router()
+        self.router = RouterProcess()
 
     def add(self, name: str, target: str, scheme: str | None = None):
         """Add a new mapping"""
