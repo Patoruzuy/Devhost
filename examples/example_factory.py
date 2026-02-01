@@ -25,6 +25,7 @@ from devhost_cli.factory import create_devhost_app
 # Includes subdomain routing, proxy endpoints, and health checks
 app = create_devhost_app()
 
+
 # Optionally add custom routes
 @app.get("/custom")
 async def custom_endpoint():

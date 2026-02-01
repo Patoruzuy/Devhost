@@ -24,11 +24,7 @@ from fastapi import APIRouter, FastAPI
 from devhost_cli.factory import create_proxy_router, enable_subdomain_routing
 
 # Option 1: Start with your own FastAPI app and add Devhost routing
-app = FastAPI(
-    title="My Application",
-    description="Custom app with Devhost subdomain routing",
-    version="1.0.0"
-)
+app = FastAPI(title="My Application", description="Custom app with Devhost subdomain routing", version="1.0.0")
 
 # Enable subdomain routing for your app
 enable_subdomain_routing(app)
@@ -45,41 +41,37 @@ async def root():
     return {
         "app": "My Custom Application",
         "devhost": "enabled",
-        "message": "Use subdomains to access proxied services"
+        "message": "Use subdomains to access proxied services",
     }
 
 
 @app.get("/api/status")
 async def status():
     """Custom status endpoint"""
-    return {
-        "status": "running",
-        "features": ["subdomain routing", "proxy support", "custom APIs"]
-    }
+    return {"status": "running", "features": ["subdomain routing", "proxy support", "custom APIs"]}
 
 
 @app.get("/api/config")
 async def config():
     """Example config endpoint"""
-    return {
-        "environment": "development",
-        "routing": "subdomain-based",
-        "proxy": "enabled"
-    }
+    return {"environment": "development", "routing": "subdomain-based", "proxy": "enabled"}
 
 
 # Custom API router example
 api_router = APIRouter(prefix="/api/v1", tags=["api"])
+
 
 @api_router.get("/items")
 async def get_items():
     """Example items endpoint"""
     return {"items": ["item1", "item2", "item3"]}
 
+
 @api_router.get("/users")
 async def get_users():
     """Example users endpoint"""
     return {"users": ["alice", "bob", "charlie"]}
+
 
 app.include_router(api_router)
 
