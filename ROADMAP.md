@@ -1,7 +1,7 @@
 # Devhost Project Roadmap
 
 **Current Version**: 2.1.0  
-**Current Branch**: `pypi-package`  
+**Published**: ✅ PyPI (Production) & TestPyPI  
 **Last Updated**: February 1, 2026
 
 ---
@@ -46,51 +46,29 @@
 - ✅ Improve admin privilege alerts
 
 ### Phase 5: PyPI Package Development
-**Status**: 🟡 90% Complete  
-**Date**: February 2026
+**Status**: ✅ COMPLETE  
+**Date**: February 2026  
+**Published**: https://pypi.org/project/devhost/
 
 **Completed**:
-- ✅ Step 1: Router refactoring (4 modules: cache, core, metrics, utils)
-- ✅ Step 2: ASGI middleware (DevhostMiddleware)
-- ✅ Step 4: Factory functions (create_devhost_app, enable_subdomain_routing)
-- ✅ Step 5: Package exports (__init__.py updated)
-- ✅ Step 6: pyproject.toml for PyPI (version 2.1.0)
-- ✅ Step 7: Usage examples (FastAPI, Starlette, proxy + README)
-- ✅ Step 8: Documentation updates (README with Package Usage)
-- ✅ 25/25 tests passing
+- ✅ Router refactoring (4 modules: cache, core, metrics, utils)
+- ✅ ASGI middleware (DevhostMiddleware for FastAPI/Starlette)
+- ✅ Factory functions (create_devhost_app, enable_subdomain_routing, create_proxy_router)
+- ✅ Package exports updated (__init__.py)
+- ✅ pyproject.toml configured for PyPI (version 2.1.0)
+- ✅ Usage examples (4 examples: FastAPI, Starlette, proxy, README)
+- ✅ Documentation updates (README with Package Usage section)
+- ✅ **65/65 tests passing** (exceeded 43+ target!)
+- ✅ GitHub Actions workflow for automated publishing
+- ✅ Published to TestPyPI successfully
+- ✅ Published to PyPI (production)
+- ✅ Copilot code review fixes applied
+- ✅ All linting checks passing
 
-**Remaining (to close Track A cleanly)**
-- ⏭️ WSGI middleware (Flask/Django support) [moves to Track A Phase 6]
-- ⏭️ Expand test coverage (25 → 43+ target)
-- ⏭️ GitHub Actions for publishing (TestPyPI → PyPI)
-- ⏭️ Release docs (versioning, tagging, publish checklist)
-
----
-
-## 🎯 Active Development
-
-### Phase 5 Completion (In Progress)
-**Priority**: 🔥 Critical  
-**Timeline**: 1-2 days  
-**Target**: Complete PyPI package
-
-**Tasks**:
-1. ✅ Add router health check tests (2 tests)
-2. ✅ Add metrics endpoint tests (2 tests)
-3. ✅ Add route cache reload tests (3 tests)
-4. ✅ Add subdomain extraction edge cases (4 tests)
-5. ✅ Add target parsing edge cases (3 tests)
-6. ✅ Add middleware configuration tests (4 tests)
-7. ✅ Create GitHub Actions workflow for PyPI
-8. ✅ Test PyPI upload to TestPyPI
-9. ✅ Create release documentation
-
-**Success Criteria**:
-- 43+ tests passing
-- Package builds: `python -m build`
-- Installable: `pip install -e .`
-- Published to TestPyPI
-- Ready for PyPI production
+**Installation**:
+```bash
+pip install devhost
+```
 
 ---
 
