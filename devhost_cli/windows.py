@@ -229,7 +229,8 @@ def doctor_windows(fix: bool = False) -> None:
 
     if fix:
         if not is_admin():
-            msg_error("Fix requires Administrator privileges.")
+            msg_error("⚠️  Administrator privileges required for automatic fixes.")
+            msg_info("Please run 'devhost doctor --windows --fix' from an elevated PowerShell.")
             return
         if domain != "localhost":
             hosts_sync()

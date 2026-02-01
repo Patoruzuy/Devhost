@@ -9,7 +9,7 @@ from . import __version__
 from .cli import DevhostCLI
 from .config import Config
 from .platform import IS_WINDOWS, is_admin, relaunch_as_admin
-from .utils import msg_error, msg_info
+from .utils import msg_error, msg_info, msg_warning
 from .windows import caddy_restart, caddy_start, caddy_status, caddy_stop, doctor_windows, hosts_clear, hosts_sync
 
 
@@ -25,7 +25,8 @@ def ensure_admin_if_needed(command: str, args: list[str], domain: str) -> None:
     if domain == "localhost":
         return
     if command in {"add", "remove", "hosts", "domain"}:
-        msg_info("Re-launching as Administrator to update hosts entries...")
+        msg_warning("⚠️  Administrator privileges required to update Windows hosts file.")
+        msg_info("Re-launching as Administrator...")
         relaunch_as_admin([command] + args)
         sys.exit(0)
 
@@ -182,7 +183,8 @@ def main():
                 msg_error("Hosts management is supported on Windows only.")
                 success = False
             elif not is_admin():
-                msg_error("Hosts management requires Administrator privileges.")
+                msg_error("⚠️  Administrator privileges required for hosts file management.")
+                msg_info("Please run this command from an elevated PowerShell.")
                 success = False
             else:
                 if args.action == "sync":
