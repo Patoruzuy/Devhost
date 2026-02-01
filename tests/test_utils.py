@@ -1,9 +1,7 @@
 """Tests for router utils module"""
 
 import os
-import tempfile
 import unittest
-from pathlib import Path
 
 from devhost_cli.router.utils import extract_subdomain, load_domain, parse_target
 
@@ -125,7 +123,7 @@ class UtilsTests(unittest.TestCase):
     def test_parse_target_ipv6_with_port(self):
         """Test IPv6 address with port (not currently supported)"""
         # This should fail gracefully
-        result = parse_target("[::1]:8080")
+        parse_target("[::1]:8080")
         # Current implementation won't parse this correctly
         # This test documents current behavior
 

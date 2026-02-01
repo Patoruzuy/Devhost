@@ -1,6 +1,5 @@
 """Tests for router cache module"""
 
-import asyncio
 import json
 import os
 import tempfile
@@ -76,7 +75,7 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_route_cache_handles_missing_file(self):
         """Test cache behavior when config file is missing"""
         from unittest.mock import patch
-        
+
         # Mock _select_config_path to return None (no config found)
         with patch('devhost_cli.router.cache._select_config_path', return_value=None):
             cache = RouteCache()
