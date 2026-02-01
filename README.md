@@ -39,9 +39,10 @@ python install.py --linux  # or --macos, --windows
 
 ## Features
 
-- **CLI Tool**: Map domains like `app.localhost` → `localhost:1234`
+- **CLI Tool**: Map subdomains to ports (e.g., `app.localhost` → `localhost:1234`)
+- **Custom Base Domain**: Change from `localhost` to anything (e.g., `app.flask`, `api.devhost`)
 - **ASGI Middleware**: Embed subdomain routing in FastAPI/Starlette apps
-- **Remote IPs**: Map to devices on your network (e.g. `rpi.localhost` → `192.168.1.100:8080`)
+- **Remote Network Devices**: Map to any IP on your network (e.g., `rpi.localhost` → `192.168.1.100:8080`)
 - **HTTPS Support**: Via Caddy's internal CA (use `--https`)
 - **Cross-Platform**: Works on macOS, Linux, and Windows
 - **Hot Reload**: Changes take effect immediately without restart
@@ -87,6 +88,44 @@ app = create_devhost_app()
 ```
 
 See [examples/](examples/) for more integration patterns.
+
+## Custom Base Domains
+
+**By default, Devhost uses `.localhost`** (e.g., `app.localhost`, `api.localhost`), but you can change it to **any domain you want**.
+
+### Change the base domain:
+
+```bash
+devhost domain flask
+```
+
+Now all your routes use `.flask` instead:
+
+```bash
+devhost add app 3000     # Creates app.flask → localhost:3000
+devhost add api 8000     # Creates api.flask → localhost:8000
+devhost add rpi 192.168.1.100:8080  # Creates rpi.flask → 192.168.1.100:8080
+```
+
+Visit `app.flask`, `api.flask`, or `rpi.flask` in your browser!
+
+### Why use custom domains?
+
+- **Project-specific namespaces**: Use `myproject` domain for all related services
+- **Better organization**: Separate domains for different projects (`frontend.prod`, `api.staging`)
+- **Avoid conflicts**: If another tool uses `.localhost`, switch to `.dev` or `.local`
+- **Memorable names**: `blog.gatsby` is easier to remember than `blog.localhost`
+
+### Setup requirements:
+
+After changing the domain, re-run the installer to update DNS/resolver configuration:
+
+```bash
+devhost domain myproject
+python install.py --linux --domain myproject  # or --macos, --windows
+```
+
+**All routes automatically use your custom domain** - both localhost ports AND remote network devices!
 
 ## Benefits for Devs
 
@@ -218,13 +257,17 @@ Quick Commands
 
 ## Remote IP Support
 
-Devhost supports mapping domains to devices on your local network, not just localhost ports. This is perfect for:
+Devhost supports mapping subdomains to devices on your local network, not just localhost ports. **Remote devices use the same base domain** as your localhost routes.
+
+Perfect for:
 - Raspberry Pi projects
-- IoT devices
+- IoT devices  
 - Other computers on your network
 - Docker containers with bridge networking
 
 ### Examples
+
+**With default `.localhost` domain:**
 
 **Raspberry Pi running a web server**:
 ```bash
@@ -232,21 +275,32 @@ devhost add rpi 192.168.1.100:8080
 # Access at http://rpi.localhost
 ```
 
-**Network attached storage (NAS) web interface**:
+**Network attached storage (NAS)**:
 ```bash
 devhost add nas 192.168.1.50:5000
 devhost open nas  # Opens http://nas.localhost
 ```
 
-**Remote development server**:
+**With custom `.devhost` domain:**
+
 ```bash
-devhost add staging 10.0.0.25:3000
-# Access at http://staging.localhost
+# First, change the base domain
+devhost domain devhost
+
+# Then add remote devices
+devhost add rpi 192.168.1.100:8080    # Access at rpi.devhost
+devhost add nas 192.168.1.50:5000     # Access at nas.devhost
+devhost add router 192.168.1.1:80     # Access at router.devhost
 ```
 
-**Docker container with bridge network**:
+**Mix localhost and remote IPs** (all use same domain):
+
 ```bash
-devhost add docker 172.17.0.2:8080
+devhost domain myproject
+devhost add frontend 3000                    # frontend.myproject → localhost:3000
+devhost add api 8000                         # api.myproject → localhost:8000  
+devhost add rpi 192.168.1.100:8080          # rpi.myproject → 192.168.1.100:8080
+devhost add staging 10.0.0.25:3000          # staging.myproject → 10.0.0.25:3000
 ```
 
 ### Configuration Format
