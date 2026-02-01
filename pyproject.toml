@@ -1,6 +1,6 @@
 [project]
 name = "devhost"
-version = "2.3.0"
+version = "2.3.1"
 description = "Lightweight local development domain router with ASGI and WSGI middleware support"
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.10"

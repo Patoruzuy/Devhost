@@ -78,23 +78,25 @@ def generate_caddyfile(routes: dict[str, Any] | None = None) -> None:
     if routes is None:
         routes = Config().load()
 
-    script_dir = Path(__file__).parent.parent.resolve()
-    caddyfile_path = script_dir / "caddy" / "Caddyfile"
+    content = render_caddyfile(routes)
 
-    # Generate and write project Caddyfile
-    caddyfile_path.parent.mkdir(parents=True, exist_ok=True)
-    caddyfile_path.write_text(render_caddyfile(routes), encoding="utf-8")
-
-    # Sync to user Caddy config
+    # Always write to user config directory (works for pip install and source install)
     user_caddy = Path.home() / ".config" / "caddy" / "Caddyfile"
-    if user_caddy.parent.exists():
-        user_caddy.write_text(caddyfile_path.read_text(encoding="utf-8"), encoding="utf-8")
+    user_caddy.parent.mkdir(parents=True, exist_ok=True)
+    user_caddy.write_text(content, encoding="utf-8")
+
+    # Also write to project caddy/ directory if it exists (for source installs)
+    script_dir = Path(__file__).parent.parent.resolve()
+    project_caddy_dir = script_dir / "caddy"
+    if project_caddy_dir.exists():
+        caddyfile_path = project_caddy_dir / "Caddyfile"
+        caddyfile_path.write_text(content, encoding="utf-8")
 
     # Sync to system Caddy config (non-Windows)
     if not IS_WINDOWS:
         system_caddy = Path("/etc/caddy/Caddyfile")
         if system_caddy.exists() and shutil.which("sudo"):
-            subprocess.run(["sudo", "cp", str(caddyfile_path), str(system_caddy)], check=False)
+            subprocess.run(["sudo", "cp", str(user_caddy), str(system_caddy)], check=False)
         if shutil.which("systemctl"):
             subprocess.run(["sudo", "systemctl", "reload", "caddy"], check=False)
 

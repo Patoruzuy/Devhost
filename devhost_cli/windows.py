@@ -118,6 +118,8 @@ def caddy_start() -> None:
     """Start Caddy on Windows"""
     from pathlib import Path
 
+    from .caddy import generate_caddyfile
+
     exe = find_caddy_exe()
     if not exe:
         msg_error("Caddy not found. Install with: devhost install --caddy")
@@ -138,10 +140,20 @@ def caddy_start() -> None:
         msg_warning("Stop that process or free port 80, then retry.")
         return
 
-    script_dir = Path(__file__).parent.parent.resolve()
-    caddyfile = script_dir / "caddy" / "Caddyfile"
-    subprocess.run([exe, "start", "--config", str(caddyfile)], check=False)
-    msg_success(f"Caddy starting with config: {caddyfile}")
+    # Use user config directory (works for both pip install and source install)
+    user_caddy = Path.home() / ".config" / "caddy" / "Caddyfile"
+    user_caddy.parent.mkdir(parents=True, exist_ok=True)
+
+    # Generate Caddyfile if it doesn't exist or regenerate from current routes
+    generate_caddyfile()
+
+    if not user_caddy.exists():
+        msg_error(f"Caddyfile not found at {user_caddy}")
+        msg_info("Run 'devhost add <name> <port>' to create a route first")
+        return
+
+    subprocess.run([exe, "start", "--config", str(user_caddy)], check=False)
+    msg_success(f"Caddy starting with config: {user_caddy}")
 
 
 def caddy_stop() -> None:
