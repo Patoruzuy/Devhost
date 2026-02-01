@@ -1,2 +1,0 @@
-[console_scripts]
-devhost = devhost_cli.main:main

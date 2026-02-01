@@ -1,43 +1,22 @@
 [project]
 name = "devhost"
-version = "2.1.0"
-description = "Lightweight local development domain router with ASGI middleware support"
+version = "2.0.0"
+description = "Lightweight local development domain router"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = {text = "MIT"}
 authors = [
     {name = "Devhost Contributors"}
 ]
-keywords = ["development", "proxy", "router", "subdomain", "local", "middleware", "fastapi", "asgi"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Framework :: FastAPI",
-    "Topic :: Internet :: Proxy Servers",
-    "Topic :: Software Development",
 ]
-
-dependencies = [
-    "fastapi ~= 0.110",
-    "uvicorn ~= 0.29",
-    "httpx ~= 0.27",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest ~= 8.0",
-    "ruff ~= 0.7",
-]
-
-[project.urls]
-Homepage = "https://github.com/yourusername/devhost"
-Documentation = "https://github.com/yourusername/devhost#readme"
-Repository = "https://github.com/yourusername/devhost"
-Issues = "https://github.com/yourusername/devhost/issues"
 
 [project.scripts]
 devhost = "devhost_cli.main:main"
@@ -74,8 +53,3 @@ indent-style = "space"
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["devhost_cli*"]
-exclude = ["tests*", "caddy*", "router*", "completions*"]

@@ -1,6 +1,6 @@
 import unittest
 
-from devhost_cli.router.utils import parse_target
+from router.app import parse_target
 
 
 class TargetParseTests(unittest.TestCase):

@@ -10,7 +10,7 @@ from .platform import IS_WINDOWS, find_python
 from .utils import msg_error, msg_info, msg_step, msg_success, msg_warning
 
 
-class RouterProcess:
+class Router:
     """Manages router process lifecycle"""
 
     def __init__(self):

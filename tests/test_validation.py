@@ -2,8 +2,7 @@
 
 import unittest
 
-from devhost_cli.router.utils import parse_target
-from devhost_cli.validation import validate_ip, validate_name, validate_port
+from devhost_cli.validation import parse_target, validate_ip, validate_name, validate_port
 
 
 class ValidationTests(unittest.TestCase):
