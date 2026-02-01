@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    {name = "Devhost Contributors"}
+    {name = "Sebastian Gomez"}
 ]
 keywords = ["development", "proxy", "router", "subdomain", "local", "middleware", "fastapi", "asgi"]
 classifiers = [
