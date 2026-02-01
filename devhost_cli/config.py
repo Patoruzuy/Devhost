@@ -1,10 +1,138 @@
-"""Configuration management for devhost.json and domain settings"""
+"""Configuration management for devhost.json, devhost.yml and domain settings"""
 
 import json
 import os
 from pathlib import Path
 
 from .utils import msg_error, msg_success, msg_warning
+
+# Try to import yaml, but don't fail if not installed
+try:
+    import yaml
+
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
+
+
+class ProjectConfig:
+    """
+    Manages per-project devhost.yml configuration.
+
+    Schema:
+        name: str           # App name (becomes subdomain)
+        port: int           # Port to run on (default: auto)
+        domain: str         # Base domain (default: localhost)
+        auto_register: bool # Auto-register on startup (default: true)
+        auto_caddy: bool    # Auto-start Caddy for port 80 (default: true)
+    """
+
+    DEFAULT_CONFIG = {
+        "name": None,  # Will be auto-detected from directory
+        "port": 0,  # 0 = auto-detect free port
+        "domain": "localhost",
+        "auto_register": True,
+        "auto_caddy": True,
+    }
+
+    def __init__(self, start_path: Path | None = None):
+        self.start_path = Path(start_path or os.getcwd()).resolve()
+        self.config_file: Path | None = None
+        self.config: dict = {}
+        self._find_and_load()
+
+    def _find_and_load(self):
+        """Search for devhost.yml in current and parent directories"""
+        current = self.start_path
+
+        # Search up to 10 levels (prevent infinite loop)
+        for _ in range(10):
+            # Check for yml first, then yaml
+            for filename in ["devhost.yml", "devhost.yaml"]:
+                config_path = current / filename
+                if config_path.exists():
+                    self.config_file = config_path
+                    self._load_yaml()
+                    return
+
+            # Move to parent
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+
+        # No config found - use defaults
+        self.config = self.DEFAULT_CONFIG.copy()
+        # Auto-detect name from directory
+        self.config["name"] = self.start_path.name.lower().replace(" ", "-")
+
+    def _load_yaml(self):
+        """Load config from YAML file"""
+        if not YAML_AVAILABLE:
+            msg_warning("pyyaml not installed. Run: pip install devhost[yaml]")
+            self.config = self.DEFAULT_CONFIG.copy()
+            return
+
+        try:
+            with open(self.config_file, encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+
+            # Merge with defaults
+            self.config = {**self.DEFAULT_CONFIG, **data}
+
+            # Auto-detect name if not specified
+            if not self.config.get("name"):
+                self.config["name"] = self.config_file.parent.name.lower().replace(" ", "-")
+
+        except Exception as e:
+            msg_error(f"Failed to load {self.config_file}: {e}")
+            self.config = self.DEFAULT_CONFIG.copy()
+
+    def save(self, path: Path | None = None):
+        """Save config to YAML file"""
+        if not YAML_AVAILABLE:
+            msg_error("pyyaml not installed. Run: pip install devhost[yaml]")
+            return False
+
+        save_path = path or self.config_file or (self.start_path / "devhost.yml")
+
+        try:
+            with open(save_path, "w", encoding="utf-8") as f:
+                yaml.dump(self.config, f, default_flow_style=False, sort_keys=False)
+            self.config_file = save_path
+            return True
+        except Exception as e:
+            msg_error(f"Failed to save config: {e}")
+            return False
+
+    @property
+    def name(self) -> str:
+        return self.config.get("name") or self.start_path.name.lower()
+
+    @property
+    def port(self) -> int:
+        return self.config.get("port") or 0
+
+    @property
+    def domain(self) -> str:
+        return self.config.get("domain") or "localhost"
+
+    @property
+    def auto_register(self) -> bool:
+        return self.config.get("auto_register", True)
+
+    @property
+    def auto_caddy(self) -> bool:
+        return self.config.get("auto_caddy", True)
+
+    @property
+    def url(self) -> str:
+        """Get the full URL for this app"""
+        return f"http://{self.name}.{self.domain}"
+
+    def exists(self) -> bool:
+        """Check if a project config file was found"""
+        return self.config_file is not None
 
 
 class Config:
