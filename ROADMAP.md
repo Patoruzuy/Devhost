@@ -1,8 +1,8 @@
 # Devhost Project Roadmap
 
-**Current Version**: 2.2.0  
+**Current Version**: 2.3.0  
 **Published**: ✅ PyPI (Production) & TestPyPI  
-**Last Updated**: February 1, 2026
+**Last Updated**: February 2026
 
 ---
 
@@ -90,11 +90,53 @@ pip install devhost[flask]    # Flask support
 pip install devhost[django]   # Django support
 ```
 
+### Phase 7: Zero-Config Runner
+**Status**: ✅ COMPLETE  
+**Date**: February 2026  
+**Version**: 2.3.0
+
+**Completed**:
+- ✅ **ProjectConfig class** (devhost.yml support for per-project configuration)
+- ✅ **DevhostRunner** (unified app runner with auto-registration)
+- ✅ **Framework detection** (Flask, FastAPI, Django, generic WSGI)
+- ✅ **Conflict resolution** (prompt user or auto-suffix)
+- ✅ **Framework wrappers** (run_flask, run_fastapi, run_django)
+- ✅ **`devhost init` CLI command** (interactive project setup)
+- ✅ **pyyaml optional dependency** (`pip install devhost[yaml]`)
+- ✅ **13 new tests** (54 total tests)
+- ✅ Documentation updates (README with Zero-Config section)
+
+**Usage**:
+```python
+# Flask (one-line)
+from devhost_cli.frameworks import run_flask
+from flask import Flask
+app = Flask(__name__)
+run_flask(app, name="myapp")  # → http://myapp.localhost
+
+# FastAPI (one-line)
+from devhost_cli.frameworks import run_fastapi
+from fastapi import FastAPI
+app = FastAPI()
+run_fastapi(app, name="api")  # → http://api.localhost
+
+# Django
+from devhost_cli.frameworks import run_django
+run_django("myproject.wsgi.application", name="admin")
+```
+
+**Installation**:
+```bash
+pip install devhost[yaml]    # YAML config support
+pip install devhost[flask]   # Flask + YAML
+pip install devhost[django]  # Django + YAML
+```
+
 ---
 
 ## 📅 Planned Phases
 
-### Phase 7: Advanced CI/CD Features
+### Phase 8: Advanced CI/CD Features
 **Priority**: 🔥 Medium  
 **Timeline**: 1 day  
 **Target**: Automated distribution
@@ -137,14 +179,14 @@ pip install devhost[django]   # Django support
 
 ---
 
-### Phase 8: Advanced Features
+### Phase 9: Advanced Features
 **Priority**: 🟡 Medium  
 **Timeline**: 1 week  
 **Target**: Power user features
 
 **Feature List**:
 
-#### 8.1: Route Hot-Reload Events
+#### 9.1: Route Hot-Reload Events
 ```python
 from devhost import DevhostMiddleware
 
@@ -159,13 +201,13 @@ middleware = DevhostMiddleware(app, on_reload=on_routes_updated)
 - Update application state
 - Log route modifications
 
-#### 8.2: Health Check Endpoints
+#### 9.2: Health Check Endpoints
 - Add `/_devhost/health` endpoint
 - Show current route status
 - Display proxy metrics
 - Health check for upstream services
 
-#### 8.3: Request/Response Logging
+#### 9.3: Request/Response Logging
 ```python
 DevhostMiddleware(
     app,
@@ -182,13 +224,13 @@ DevhostMiddleware(
 - Request tracing with IDs
 - Debug mode with headers/body
 
-#### 8.4: Route Validation & Warnings
+#### 9.4: Route Validation & Warnings
 - Detect port conflicts
 - Warn about unreachable targets
 - Validate SSL/TLS for https:// targets
 - Check DNS resolution
 
-#### 8.5: WebSocket Proxying
+#### 9.5: WebSocket Proxying
 - Support `ws://` and `wss://` protocols
 - Maintain WebSocket connections
 - Proxy WebSocket frames
@@ -204,7 +246,7 @@ DevhostMiddleware(
 
 ---
 
-### Phase 9: Documentation & Ecosystem
+### Phase 10: Documentation & Ecosystem
 **Priority**: 🟡 Medium  
 **Timeline**: 2 weeks  
 **Target**: Developer experience & adoption

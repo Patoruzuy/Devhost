@@ -40,18 +40,72 @@ python install.py --linux  # or --macos, --windows
 ## Features
 
 - **CLI Tool**: Map subdomains to ports (e.g., `app.localhost` → `localhost:1234`)
+- **Zero-Config Runner**: One line to run your app with subdomain support (v2.3+)
+- **Project Config**: `devhost.yml` per-project configuration
 - **Custom Base Domain**: Change from `localhost` to anything (e.g., `app.flask`, `api.devhost`)
-- **ASGI Middleware**: Embed subdomain routing in FastAPI/Flask/Django/Starlette apps
+- **ASGI Middleware**: Embed subdomain routing in FastAPI/Starlette apps
+- **WSGI Middleware**: Flask and Django support (v2.2+)
 - **Remote Network Devices**: Map to any IP on your network (e.g., `rpi.localhost` → `192.168.1.100:8080`)
 - **HTTPS Support**: Via Caddy's internal CA (use `--https`)
 - **Cross-Platform**: Works on macOS, Linux, and Windows
 - **Hot Reload**: Changes take effect immediately without restart
-- **Factory Functions**: Easy integration with existing FastAPI apps
-- **Flask & Django Support**: Production-ready WSGI middleware (v2.2+)
+- **Auto-Registration**: Apps register themselves on startup, cleanup on exit
 
 ## Use Cases
 
-### 1. CLI Tool (Traditional Usage)
+### 1. Zero-Config Runner (Recommended - v2.3+)
+
+The simplest way to run your app with subdomain support:
+
+```bash
+# Create project config
+devhost init
+# → Creates devhost.yml with your app name
+```
+
+```python
+# In your app
+from flask import Flask
+from devhost_cli.runner import run
+
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return "Hello!"
+
+if __name__ == '__main__':
+    run(app)  # That's it! Accessible at http://myapp.localhost
+```
+
+Output:
+```
+🚀 Starting myapp...
+✓ Registered: myapp.localhost → 127.0.0.1:8000
+🌐 Access at: http://myapp.localhost:8000
+```
+
+**Framework-specific wrappers:**
+
+```python
+# Flask
+from devhost_cli.frameworks.flask import run_flask
+run_flask(app)
+
+# Flask with SocketIO
+from devhost_cli.frameworks.flask import run_flask
+run_flask(app, socketio=socketio)
+
+# FastAPI
+from devhost_cli.frameworks.fastapi import run_fastapi
+run_fastapi(app)
+
+# Django
+from devhost_cli.frameworks.django import run_django
+run_django()
+```
+
+### 2. CLI Tool (Traditional Usage)
 
 Manage local development domains from the command line:
 
@@ -61,7 +115,7 @@ devhost add frontend 3000
 devhost list
 ```
 
-### 2. ASGI Middleware (New in v2.1+)
+### 3. ASGI Middleware (v2.1+)
 
 Embed Devhost routing directly in your FastAPI/Starlette application:
 
@@ -77,7 +131,7 @@ async def read_root():
     return {"message": "Hello from FastAPI with Devhost routing!"}
 ```
 
-### 3. WSGI Middleware (New in v2.2+)
+### 3. WSGI Middleware (v2.2+)
 
 Embed Devhost routing in your Flask or Django application:
 
@@ -157,12 +211,39 @@ python install.py --linux --domain myproject  # or --macos, --windows
 
 **All routes automatically use your custom domain** - both localhost ports AND remote network devices!
 
+## Project Configuration (devhost.yml)
+
+Create a `devhost.yml` in your project root for per-project settings:
+
+```bash
+devhost init
+```
+
+Or create manually:
+
+```yaml
+# devhost.yml
+name: myapp           # App name (becomes subdomain)
+port: 8000           # Port to run on (omit for auto-detect)
+domain: localhost    # Base domain
+auto_register: true  # Register route on startup
+auto_caddy: true     # Prompt to start Caddy for port 80
+```
+
+The runner reads this config automatically:
+
+```python
+from devhost_cli.runner import run
+run(app)  # Uses settings from devhost.yml
+```
+
 ## Benefits for Devs
 
 - No need to remember localhost:PORT combos
 - Clean and memorable dev URLs
 - HTTP by default; HTTPS available with `--https`
 - Works with any language/framework running locally
+- **Zero-config**: Just run your app, it registers itself
 
 ## Quickstart
 
