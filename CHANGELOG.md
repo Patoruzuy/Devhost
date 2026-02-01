@@ -9,14 +9,28 @@ Semantic Versioning.
 ### Added
 - `devhost fix-http` to convert `https://` mappings back to `http://`.
 - `devhost.ps1` PowerShell shim for easier Windows invocation.
+- Modular `devhost_cli` package with 11 separate modules for better maintainability.
+- Integration tests for both router and CLI (19 tests total).
+- Request ID tracking (UUID-based) with X-Request-ID header for debugging.
+- Remote IP support - map domains to devices on your network (e.g., Raspberry Pi).
+- Comprehensive troubleshooting documentation in README.
+- Windows hosts file behavior documentation with admin elevation requirements.
+- Remote IP examples in README (Raspberry Pi, NAS, Docker containers).
+- Caddy template now uses file-based `Caddyfile.template` instead of inline string.
+- `DEVHOST_CONFIG` environment variable support in CLI Config class.
 
 ### Changed
 - Wildcard Caddy vhost now defaults to HTTP-only (HTTPS is per-mapping with `--https`).
 - CLI output uses ASCII-safe symbols for Windows terminals.
+- Refactored monolithic 1412-line CLI script into organized package structure.
+- Dependencies pinned with ~= for patch-level flexibility.
+- Python 3.10 added to CI test matrix (3.10, 3.11, 3.12).
+- Ruff linting enforced in CI with --fix option.
 
 ### Fixed
 - Windows elevation relaunch now passes `--elevated` before the subcommand.
 - CLI list/url/open no longer fail due to missing methods or Unicode output.
+- Docker healthcheck added for better container monitoring.
 
 ## [1.0.0] - 2026-01-28
 ### Added

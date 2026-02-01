@@ -1,15 +1,16 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import Response, JSONResponse
-import httpx
-import json
-import os
-import logging
 import asyncio
+import json
+import logging
+import os
 import time
+import uuid
 from pathlib import Path
-import uvicorn
-from typing import Optional, Dict, Tuple
 from urllib.parse import urlparse
+
+import httpx
+import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response
 
 app = FastAPI()
 
@@ -35,10 +36,10 @@ START_TIME = time.time()
 class Metrics:
     def __init__(self) -> None:
         self.requests_total = 0
-        self.requests_by_status: Dict[int, int] = {}
-        self.requests_by_subdomain: Dict[str, Dict[str, int]] = {}
+        self.requests_by_status: dict[int, int] = {}
+        self.requests_by_subdomain: dict[str, dict[str, int]] = {}
 
-    def record(self, subdomain: Optional[str], status_code: int) -> None:
+    def record(self, subdomain: str | None, status_code: int) -> None:
         self.requests_total += 1
         self.requests_by_status[status_code] = self.requests_by_status.get(status_code, 0) + 1
         if subdomain:
@@ -47,7 +48,7 @@ class Metrics:
             if status_code >= 400:
                 bucket["errors"] += 1
 
-    def snapshot(self) -> Dict[str, object]:
+    def snapshot(self) -> dict[str, object]:
         return {
             "uptime_seconds": int(time.time() - START_TIME),
             "requests_total": self.requests_total,
@@ -80,7 +81,7 @@ def load_domain() -> str:
     return "localhost"
 
 
-def extract_subdomain(host_header: Optional[str], base_domain: Optional[str] = None) -> Optional[str]:
+def extract_subdomain(host_header: str | None, base_domain: str | None = None) -> str | None:
     if not host_header:
         return None
     base_domain = (base_domain or load_domain()).strip(".").lower()
@@ -118,7 +119,7 @@ def _config_candidates() -> list[Path]:
     return unique
 
 
-def _load_routes_from_path(path: Path) -> Optional[Dict[str, int]]:
+def _load_routes_from_path(path: Path) -> dict[str, int] | None:
     try:
         content = path.read_text()
         if not content.strip():
@@ -132,7 +133,7 @@ def _load_routes_from_path(path: Path) -> Optional[Dict[str, int]]:
     return {}
 
 
-def _select_config_path() -> Optional[Path]:
+def _select_config_path() -> Path | None:
     for path in _config_candidates():
         try:
             if path.is_file():
@@ -144,12 +145,12 @@ def _select_config_path() -> Optional[Path]:
 
 class RouteCache:
     def __init__(self) -> None:
-        self._routes: Dict[str, int] = {}
+        self._routes: dict[str, int] = {}
         self._last_mtime: float = 0.0
-        self._last_path: Optional[Path] = None
+        self._last_path: Path | None = None
         self._lock = asyncio.Lock()
 
-    async def get_routes(self) -> Dict[str, int]:
+    async def get_routes(self) -> dict[str, int]:
         path = _select_config_path()
         if not path:
             if self._routes:
@@ -186,7 +187,7 @@ class RouteCache:
 ROUTE_CACHE = RouteCache()
 
 
-def parse_target(value) -> Optional[Tuple[str, int, str]]:
+def parse_target(value) -> tuple[str, int, str] | None:
     if value is None:
         return None
     if isinstance(value, int):
@@ -214,15 +215,23 @@ def parse_target(value) -> Optional[Tuple[str, int, str]]:
 
 @app.middleware("http")
 async def request_metrics(request: Request, call_next):
+    # Generate unique request ID
+    request_id = str(uuid.uuid4())[:8]
+
     host_header = request.headers.get("host", "")
     subdomain = extract_subdomain(host_header, load_domain())
     start = time.time()
     response = await call_next(request)
     METRICS.record(subdomain, response.status_code)
+
+    # Add request ID to response headers
+    response.headers["X-Request-ID"] = request_id
+
     if LOG_REQUESTS:
         duration_ms = int((time.time() - start) * 1000)
         logger.info(
-            "%s %s -> %d (%dms)",
+            "[%s] %s %s -> %d (%dms)",
+            request_id,
             request.method,
             request.url.path or "/",
             response.status_code,
@@ -315,23 +324,28 @@ async def wildcard_proxy(request: Request, full_path: str):
     base_domain = load_domain()
     subdomain = extract_subdomain(host_header, base_domain)
     if not subdomain:
+        request_id = str(uuid.uuid4())[:8]
         if host_header in {"127.0.0.1:5555", "localhost:5555", "127.0.0.1", "localhost", ""}:
-            logger.info("Direct router access without Host header: %s", host_header)
+            logger.info("[%s] Direct router access without Host header: %s", request_id, host_header)
             return JSONResponse(
                 {
                     "error": "Missing or invalid Host header",
                     "hint": "Use devhost open <name> or send Host header (e.g. curl -H 'Host: hello.localhost' http://127.0.0.1:5555/)",
+                    "request_id": request_id,
                 },
                 status_code=400,
             )
-        logger.warning("Invalid Host header: %s", host_header)
-        return JSONResponse({"error": "Missing or invalid Host header"}, status_code=400)
+        logger.warning("[%s] Invalid Host header: %s", request_id, host_header)
+        return JSONResponse({"error": "Missing or invalid Host header", "request_id": request_id}, status_code=400)
 
     target_value = routes.get(subdomain)
     target = parse_target(target_value)
     if not target:
-        logger.info("No route found for %s.%s", subdomain, base_domain)
-        return JSONResponse({"error": f"No route found for {subdomain}.{base_domain}"}, status_code=404)
+        request_id = str(uuid.uuid4())[:8]
+        logger.info("[%s] No route found for %s.%s", request_id, subdomain, base_domain)
+        return JSONResponse(
+            {"error": f"No route found for {subdomain}.{base_domain}", "request_id": request_id}, status_code=404
+        )
     target_scheme, target_host, target_port = target
 
     # build upstream URL and preserve query string
@@ -352,11 +366,21 @@ async def wildcard_proxy(request: Request, full_path: str):
                 timeout=30.0,
             )
         except httpx.RequestError as exc:
-            logger.warning("Upstream request failed for %s.%s -> %s: %s", subdomain, base_domain, url, exc)
-            return JSONResponse({"error": f"Upstream request failed: {exc}"}, status_code=502)
+            request_id = str(uuid.uuid4())[:8]
+            logger.warning("[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc)
+            return JSONResponse({"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502)
 
     # Filter hop-by-hop headers
-    excluded = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"}
+    excluded = {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    }
     resp_headers = {k: v for k, v in proxy_resp.headers.items() if k.lower() not in excluded}
 
     return Response(content=proxy_resp.content, status_code=proxy_resp.status_code, headers=resp_headers)

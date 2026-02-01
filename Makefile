@@ -28,7 +28,11 @@ docker-up:
 	docker compose up --build -d
 
 lint: install
-	-$(PY) -m ruff check .
+	$(PY) -m ruff check .
+	$(PY) -m ruff format --check .
+
+format: install
+	$(PY) -m ruff format .
 
 devhost-url:
 	./devhost url

@@ -1,8 +1,18 @@
-# macOS Setup for Devhost (updated)
+# macOS Setup for Devhost
 
-This document shows a safe way to run Devhost's router on macOS and configure DNS using `dnsmasq`.
+> **⚠️ Recommended**: Use the automated installer for easier setup:
+> ```bash
+> python install.py --macos --yes --start-dns --install-completions
+> ```
+> See the main [README.md](../README.md) for installation options and details.
 
-Install dnsmasq
+---
+
+## Manual Installation (Advanced)
+
+This document describes the manual setup process for advanced users who want to understand how Devhost works under the hood.
+
+### Install dnsmasq
 
 ```bash
 brew install dnsmasq

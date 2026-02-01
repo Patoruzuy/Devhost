@@ -1,4 +1,6 @@
-# Devhost
+
+
+# 🌐 Devhost
 
 ![CI](https://github.com/Patoruzuy/Devhost/actions/workflows/ci.yml/badge.svg)
 ![Release](https://img.shields.io/github/v/release/Patoruzuy/Devhost)
@@ -10,6 +12,7 @@ Devhost allows you to map subdomains of a base domain (default: `localhost`, e.g
 ## Features
 
 - Map domains like `app.localhost` → `localhost:1234`
+- Map domains to remote IPs (e.g. `rpi.localhost` → `192.168.1.100:8080`)
 - HTTPS support via Caddy's internal CA (use `--https`)
 - Add/remove routes using a single CLI command
 - Wildcard reverse proxy using Python (FastAPI)
@@ -38,6 +41,20 @@ devhost remove hello
 Visit `hello.localhost` in your browser.
 
 Note: the `devhost` CLI is implemented in Python (cross-platform).
+
+### Installation Options
+
+The installer supports various flags to customize the setup process:
+
+| Flag | Description | Platforms |
+|------|-------------|-----------|
+| `--yes` | Accept all prompts automatically (non-interactive mode) | All |
+| `--dry-run` | Show what would be done without making any changes | All |
+| `--domain <name>` | Set custom base domain (default: localhost) | All |
+| `--start-dns` | Automatically start DNS service (dnsmasq) | macOS, Linux |
+| `--install-completions` | Install shell completions for bash/zsh | macOS, Linux |
+| `--caddy` | Install and configure Caddy web server | Windows |
+| `--clean` | Remove existing installation before reinstalling | Windows |
 
 Cross-platform installer (uses the Python CLI):
 
@@ -92,6 +109,7 @@ Notes & safety
 Quick Commands
 
 - `devhost add <name> <port|host:port>` — add a mapping (e.g. `devhost add hello 3000`).
+- `devhost add <name> <ip:port>` — add remote IP mapping (e.g. `devhost add rpi 192.168.1.100:8080`).
 - `devhost add <name> --http <port|host:port>` — force HTTP when opening the dev URL.
 - `devhost add <name> --https <port|host:port>` — force HTTPS when opening the dev URL.
 - `devhost remove <name>` — remove a mapping.
@@ -114,31 +132,61 @@ Quick Commands
 - `devhost caddy start|stop|restart|status` — manage Caddy on Windows.
 - `devhost fix-http` — convert all `https://` mappings to `http://` and regenerate Caddyfile.
 
+## Remote IP Support
 
-## How It Works
+Devhost supports mapping domains to devices on your local network, not just localhost ports. This is perfect for:
+- Raspberry Pi projects
+- IoT devices
+- Other computers on your network
+- Docker containers with bridge networking
 
-Devhost consists of two components:
+### Examples
 
-1. **Router** - A FastAPI app that proxies requests based on subdomain
-2. **CLI** - Python script to manage configuration
-
+**Raspberry Pi running a web server**:
+```bash
+devhost add rpi 192.168.1.100:8080
+# Access at http://rpi.localhost
 ```
-┌─────────────┐
-│   Browser   │
-└──────┬──────┘
-       │ http://myapp.localhost
-       │
-┌──────▼────────┐
-│ Devhost Router│ :5555
-│  (localhost)  │
-└──────┬────────┘
-       │ Routing based on subdomain
-       │
-┌──────▼────────┐
-│   Your App    │ :3000
-│  (localhost)  │
-└───────────────┘
+
+**Network attached storage (NAS) web interface**:
+```bash
+devhost add nas 192.168.1.50:5000
+devhost open nas  # Opens http://nas.localhost
 ```
+
+**Remote development server**:
+```bash
+devhost add staging 10.0.0.25:3000
+# Access at http://staging.localhost
+```
+
+**Docker container with bridge network**:
+```bash
+devhost add docker 172.17.0.2:8080
+```
+
+### Configuration Format
+
+Remote IPs can be added in several formats:
+- `192.168.1.100:8080` - Full IP with port
+- `10.0.0.25:3000` - Any valid IPv4 address
+- Combined with other targets in `devhost.json`:
+
+```json
+{
+  "hello": 3000,
+  "api": 8000,
+  "rpi": "192.168.1.100:8080",
+  "nas": "192.168.1.50:5000"
+}
+```
+
+### Notes
+
+- The remote device must be reachable from your machine
+- Ensure firewalls allow traffic to the target port
+- IP addresses are validated when adding routes
+- Use `devhost resolve <name>` to test connectivity
 
 Configuration
 
@@ -185,13 +233,62 @@ less caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-Troubleshooting
+## Troubleshooting
 
-- Check mappings: `devhost list`.
-- Router health: `curl http://127.0.0.1:5555/health` should return `{ "status": "ok" }`.
-- If DNS/resolver issues on Linux, check `systemd-resolved` and `/etc/resolv.conf` for unintended changes.
-- Ensure Caddy is running if you depend on system TLS (check `systemctl status caddy`).
-- If your browser keeps forcing HTTPS after switching a mapping to HTTP, clear HSTS for the domain or change the base domain (e.g. `devhost domain devhost2`).
+### General Issues
+
+- **Check mappings**: `devhost list` - Verify your routes are configured correctly.
+- **Router health**: `curl http://127.0.0.1:5555/health` should return `{ "status": "ok" }`.
+- **Check router logs**: Look for request IDs in logs to trace specific requests (X-Request-ID header).
+- **Validate setup**: `devhost validate` - Quick health checks for config, router, and DNS.
+- **Deep diagnostics**: `devhost doctor` - Comprehensive system diagnostics.
+
+### DNS & Domain Issues
+
+- **Linux DNS issues**: Check `systemd-resolved` and `/etc/resolv.conf` for unintended changes.
+- **macOS DNS issues**: Verify `/etc/resolver/<domain>` file exists and contains `nameserver 127.0.0.1`.
+- **Windows DNS issues**: Wildcard DNS requires a local resolver like Acrylic DNS. Alternatively, use `devhost hosts sync` to add individual entries to hosts file.
+- **Domain resolution**: `devhost resolve <name>` - Show DNS resolution and port reachability.
+
+### Windows-Specific Issues
+
+#### Hosts File Management
+
+**When to use hosts file** (Windows only):
+- You don't have a wildcard DNS resolver installed (like Acrylic DNS)
+- You want individual domain entries instead of wildcard DNS
+- Testing specific routes without full DNS setup
+
+**Admin elevation required**:
+- `devhost hosts sync` - Adds/updates all routes in `C:\Windows\System32\drivers\etc\hosts` (requires admin)
+- `devhost hosts clear` - Removes all devhost entries from hosts file (requires admin)
+
+**Admin NOT required**:
+- `devhost add/remove/list` - Regular route management
+- `devhost start/stop/status` - Router process management
+- `devhost validate` - Health checks
+
+The hosts file commands modify system files and therefore require administrator privileges. The CLI will automatically attempt to relaunch with elevation if needed.
+
+#### Other Windows Issues
+
+- **Port 80 conflicts**: Run `devhost doctor --windows` to check what's using port 80.
+- **Port 80 auto-fix**: `devhost doctor --windows --fix` - Attempts to free port 80 and start Caddy.
+- **Caddy not running**: `devhost caddy status` - Check Caddy status.
+- **Start Caddy**: `devhost caddy start` - Start Caddy web server.
+- **Windows diagnostics**: `devhost doctor --windows` - Windows-specific checks.
+
+### HTTPS & Certificate Issues
+
+- **Browser forcing HTTPS**: Clear HSTS settings for the domain or change base domain (`devhost domain devhost2`).
+- **Caddy not running**: Ensure Caddy is running if you depend on system TLS (`systemctl status caddy` on Linux).
+- **Convert to HTTP**: `devhost fix-http` - Convert all HTTPS mappings to HTTP.
+
+### Remote IP Issues
+
+- **Remote device unreachable**: Verify the remote IP/port is accessible from your machine (`curl http://192.168.1.100:8080`).
+- **Network firewall**: Ensure firewall rules allow traffic to the remote device.
+- **Wrong IP address**: Check the device's current IP (`devhost list` to see configured IPs).
 
 Platform notes
 

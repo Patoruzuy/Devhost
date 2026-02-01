@@ -11,10 +11,8 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
-from typing import Optional, Tuple
 
 ROOT_DIR = Path(__file__).resolve().parent
 ROUTER_DIR = ROOT_DIR / "router"
@@ -77,7 +75,7 @@ def is_root() -> bool:
     return hasattr(os, "geteuid") and os.geteuid() == 0
 
 
-def run(cmd, check=False, capture=False, sudo=False, input_text: Optional[str] = None):
+def run(cmd, check=False, capture=False, sudo=False, input_text: str | None = None):
     if sudo and not IS_WINDOWS and not is_root():
         if shutil.which("sudo"):
             cmd = ["sudo"] + cmd
@@ -103,7 +101,7 @@ def prompt_yes_no(question: str, default: bool, assume_yes: bool) -> bool:
     return reply in {"y", "yes"}
 
 
-def resolve_domain(domain_arg: Optional[str]) -> str:
+def resolve_domain(domain_arg: str | None) -> str:
     if domain_arg:
         return domain_arg.strip()
     env = os.environ.get("DEVHOST_DOMAIN")
@@ -129,6 +127,7 @@ def ensure_config_files() -> None:
 
 # -------------------------- Linux Installer --------------------------
 
+
 def _port_53_in_use() -> bool:
     if not shutil.which("ss"):
         return False
@@ -145,26 +144,35 @@ def linux_install(domain: str, assume_yes: bool) -> int:
             msg_warn("apt-get not found. Install Caddy manually: https://caddyserver.com/docs/install")
         else:
             run(["apt-get", "update"], sudo=True)
-            run([
-                "apt-get",
-                "install",
-                "-y",
-                "debian-keyring",
-                "debian-archive-keyring",
-                "apt-transport-https",
-                "curl",
-                "gnupg",
-            ], sudo=True)
-            run([
-                "bash",
-                "-c",
-                "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg",
-            ], sudo=True)
-            run([
-                "bash",
-                "-c",
-                "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null",
-            ], sudo=True)
+            run(
+                [
+                    "apt-get",
+                    "install",
+                    "-y",
+                    "debian-keyring",
+                    "debian-archive-keyring",
+                    "apt-transport-https",
+                    "curl",
+                    "gnupg",
+                ],
+                sudo=True,
+            )
+            run(
+                [
+                    "bash",
+                    "-c",
+                    "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg",
+                ],
+                sudo=True,
+            )
+            run(
+                [
+                    "bash",
+                    "-c",
+                    "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null",
+                ],
+                sudo=True,
+            )
             run(["apt-get", "update"], sudo=True)
             run(["apt-get", "install", "-y", "caddy"], sudo=True)
 
@@ -191,12 +199,7 @@ def linux_install(domain: str, assume_yes: bool) -> int:
     if _port_53_in_use():
         msg_warn("Port 53 is in use. Configuring dnsmasq on 127.0.0.1:5353.")
         dns_port = 5353
-    content = (
-        f"address=/{domain}/127.0.0.1\n"
-        f"listen-address=127.0.0.1\n"
-        "bind-interfaces\n"
-        f"port={dns_port}\n"
-    )
+    content = f"address=/{domain}/127.0.0.1\nlisten-address=127.0.0.1\nbind-interfaces\nport={dns_port}\n"
 
     if dnsmasq_conf_dir.exists():
         run(["tee", str(dnsmasq_conf_file)], sudo=True, input_text=content)
@@ -251,7 +254,8 @@ def linux_install(domain: str, assume_yes: bool) -> int:
 
 # -------------------------- macOS Installer --------------------------
 
-def detect_uvicorn() -> Optional[str]:
+
+def detect_uvicorn() -> str | None:
     candidates = [
         ROOT_DIR / ".venv" / "bin" / "uvicorn",
         ROUTER_DIR / ".venv" / "bin" / "uvicorn",
@@ -265,7 +269,9 @@ def detect_uvicorn() -> Optional[str]:
     return shutil.which("uvicorn")
 
 
-def generate_plist(template_path: Path, dest_path: Path, user: str, uvicorn_bin: str, uvicorn_args: Optional[list[str]]) -> None:
+def generate_plist(
+    template_path: Path, dest_path: Path, user: str, uvicorn_bin: str, uvicorn_args: list[str] | None
+) -> None:
     text = template_path.read_text(encoding="utf-8")
     text = text.replace("{{USER}}", user)
     text = text.replace("{{UVICORN_BIN}}", uvicorn_bin)
@@ -393,7 +399,8 @@ def macos_install(domain: str, args) -> int:
 
 # -------------------------- Windows Installer --------------------------
 
-def find_python_windows() -> Optional[str]:
+
+def find_python_windows() -> str | None:
     if shutil.which("py"):
         result = run(["py", "-3", "-c", "import sys; print(sys.executable)"], capture=True)
         if result.stdout.strip():
@@ -405,7 +412,7 @@ def find_python_windows() -> Optional[str]:
     return None
 
 
-def find_caddy_exe() -> Optional[str]:
+def find_caddy_exe() -> str | None:
     cmd = shutil.which("caddy")
     if cmd:
         return cmd
@@ -417,18 +424,36 @@ def find_caddy_exe() -> Optional[str]:
 
 
 def windows_clean(assume_yes: bool) -> bool:
-    if not prompt_yes_no("This will remove venv, devhost.json, caddy/Caddyfile, and .devhost. Continue?", False, assume_yes):
+    if not prompt_yes_no(
+        "This will remove venv, devhost.json, caddy/Caddyfile, and .devhost. Continue?", False, assume_yes
+    ):
         return False
     pid_file = ROOT_DIR / ".devhost" / "router.pid"
     if pid_file.exists():
         try:
             pid = int(pid_file.read_text().strip())
-            run(["powershell", "-NoProfile", "-Command", f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue"], check=False)
+            run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue",
+                ],
+                check=False,
+            )
         except Exception:
             pass
         pid_file.unlink(missing_ok=True)
 
-    run(["powershell", "-NoProfile", "-Command", "Get-Process caddy -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"], check=False)
+    run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Get-Process caddy -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue",
+        ],
+        check=False,
+    )
 
     venv_dir = ROUTER_DIR / "venv"
     if venv_dir.exists():
@@ -506,22 +531,28 @@ def windows_install(domain: str, args) -> int:
             else:
                 msg_warn("No package manager found. Install Caddy manually: https://caddyserver.com/docs/install")
 
-    port80 = run([
-        "powershell",
-        "-NoProfile",
-        "-Command",
-        "Get-NetTCPConnection -LocalPort 80 -ErrorAction SilentlyContinue | Select-Object -First 1 | ConvertTo-Json",
-    ], capture=True)
+    port80 = run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Get-NetTCPConnection -LocalPort 80 -ErrorAction SilentlyContinue | Select-Object -First 1 | ConvertTo-Json",
+        ],
+        capture=True,
+    )
     if port80.stdout.strip():
         try:
             data = json.loads(port80.stdout)
             pid = int(data.get("OwningProcess"))
-            proc_name = run([
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                f"(Get-Process -Id {pid} -ErrorAction SilentlyContinue).ProcessName",
-            ], capture=True)
+            proc_name = run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"(Get-Process -Id {pid} -ErrorAction SilentlyContinue).ProcessName",
+                ],
+                capture=True,
+            )
             name = proc_name.stdout.strip() or "unknown"
             msg_warn(f"Port 80 is in use by {name} (pid {pid}).")
             if name.lower() == "wslrelay" and shutil.which("wsl"):
@@ -535,19 +566,25 @@ def windows_install(domain: str, args) -> int:
                         if exe:
                             run([exe, "stop"], check=False)
                         else:
-                            run([
+                            run(
+                                [
+                                    "powershell",
+                                    "-NoProfile",
+                                    "-Command",
+                                    f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue",
+                                ],
+                                check=False,
+                            )
+                    else:
+                        run(
+                            [
                                 "powershell",
                                 "-NoProfile",
                                 "-Command",
                                 f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue",
-                            ], check=False)
-                    else:
-                        run([
-                            "powershell",
-                            "-NoProfile",
-                            "-Command",
-                            f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue",
-                        ], check=False)
+                            ],
+                            check=False,
+                        )
         except Exception:
             pass
 

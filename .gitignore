@@ -31,3 +31,9 @@ Thumbs.db
 .vscode/
 .idea/
 devhost-review.md
+.github/copilot-instructions.md
+
+devhost.legacy
+__pycache__/
+*.pyc
+devhost_cli/__pycache__/
