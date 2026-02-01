@@ -7,10 +7,79 @@ from pathlib import Path
 
 from . import __version__
 from .cli import DevhostCLI
-from .config import Config
+from .config import YAML_AVAILABLE, Config
 from .platform import IS_WINDOWS, is_admin, relaunch_as_admin
-from .utils import msg_error, msg_info, msg_warning
+from .utils import msg_error, msg_info, msg_success, msg_warning
 from .windows import caddy_restart, caddy_start, caddy_status, caddy_stop, doctor_windows, hosts_clear, hosts_sync
+
+
+def handle_init(args) -> bool:
+    """Handle devhost init command - create devhost.yml"""
+    if not YAML_AVAILABLE:
+        msg_error("pyyaml not installed. Run: pip install devhost[yaml]")
+        return False
+
+    cwd = Path.cwd()
+    config_file = cwd / "devhost.yml"
+
+    if config_file.exists() and not args.yes:
+        response = input("devhost.yml already exists. Overwrite? [y/N]: ").strip().lower()
+        if response not in ("y", "yes"):
+            msg_info("Cancelled.")
+            return False
+
+    # Get values from args or prompt
+    name = args.name
+    port = args.port
+    domain = args.domain
+
+    if not args.yes:
+        # Interactive mode
+        default_name = cwd.name.lower().replace(" ", "-")
+        if not name:
+            name = input(f"App name [{default_name}]: ").strip() or default_name
+        if port is None:
+            port_input = input("Port [auto]: ").strip()
+            port = int(port_input) if port_input else 0
+        if domain == "localhost":
+            domain_input = input(f"Domain [{domain}]: ").strip()
+            domain = domain_input or domain
+    else:
+        # Non-interactive: use defaults
+        if not name:
+            name = cwd.name.lower().replace(" ", "-")
+        if port is None:
+            port = 0
+
+    # Create config
+    config = {
+        "name": name,
+        "port": port if port else None,  # None means auto
+        "domain": domain,
+        "auto_register": True,
+        "auto_caddy": True,
+    }
+
+    # Remove None values for cleaner YAML
+    config = {k: v for k, v in config.items() if v is not None}
+
+    try:
+        import yaml
+
+        with open(config_file, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+        msg_success(f"Created {config_file}")
+        print()
+        print("Next steps:")
+        print("  1. Add to your app: from devhost_cli.runner import run")
+        print("  2. Replace app.run() with: run(app)")
+        print(f"  3. Access at: http://{name}.{domain}")
+        print()
+        return True
+    except Exception as e:
+        msg_error(f"Failed to create config: {e}")
+        return False
 
 
 def ensure_admin_if_needed(command: str, args: list[str], domain: str) -> None:
@@ -102,6 +171,13 @@ def main():
     # domain command
     domain_parser = subparsers.add_parser("domain", help="Get or set base domain")
     domain_parser.add_argument("name", nargs="?", help="Domain name to set")
+
+    # init command
+    init_parser = subparsers.add_parser("init", help="Create devhost.yml project config")
+    init_parser.add_argument("--name", "-n", help="App name (default: directory name)")
+    init_parser.add_argument("--port", "-p", type=int, help="Port number (default: auto)")
+    init_parser.add_argument("--domain", "-d", default="localhost", help="Base domain (default: localhost)")
+    init_parser.add_argument("--yes", "-y", action="store_true", help="Accept defaults without prompting")
 
     # start command
     subparsers.add_parser("start", help="Start router process (and Caddy on Windows)")
@@ -212,6 +288,8 @@ def main():
             else:
                 print(cli.config.get_domain())
                 success = True
+        elif args.command == "init":
+            success = handle_init(args)
         elif args.command == "start":
             success = cli.router.start()
         elif args.command == "stop":
