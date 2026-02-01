@@ -19,8 +19,9 @@ Usage:
 """
 
 import uvicorn
-from fastapi import FastAPI
-from devhost_cli.factory import enable_subdomain_routing, create_proxy_router
+from fastapi import APIRouter, FastAPI
+
+from devhost_cli.factory import create_proxy_router, enable_subdomain_routing
 
 # Option 1: Start with your own FastAPI app and add Devhost routing
 app = FastAPI(
@@ -68,8 +69,6 @@ async def config():
 
 
 # Custom API router example
-from fastapi import APIRouter
-
 api_router = APIRouter(prefix="/api/v1", tags=["api"])
 
 @api_router.get("/items")
@@ -107,5 +106,5 @@ if __name__ == "__main__":
     print("  2. devhost add backend 8000")
     print("  3. Visit http://frontend.localhost")
     print("=" * 60)
-    
+
     uvicorn.run(app, host="127.0.0.1", port=5555)
