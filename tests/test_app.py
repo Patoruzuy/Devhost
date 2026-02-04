@@ -10,11 +10,28 @@ from fastapi.testclient import TestClient
 from router.app import app, extract_subdomain
 
 
+class DummyRequest:
+    def __init__(self, method, url, headers=None, content=None, timeout=None):
+        self.method = method
+        self.url = url
+        self.headers = headers
+        self.content = content
+        self.timeout = timeout
+
+
 class DummyResponse:
     def __init__(self):
         self.content = b"ok"
         self.status_code = 200
         self.headers = {"content-type": "text/plain", "connection": "keep-alive"}
+
+    async def aiter_bytes(self, chunk_size=None):
+        """Stream response body in chunks."""
+        yield self.content
+
+    async def aclose(self):
+        """Close the response."""
+        pass
 
 
 class DummyAsyncClient:
@@ -28,6 +45,25 @@ class DummyAsyncClient:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+    async def aclose(self):
+        """Close the client."""
+        pass
+
+    def build_request(self, method, url, headers=None, content=None, timeout=None):
+        """Build a request object."""
+        return DummyRequest(method=method, url=url, headers=headers, content=content, timeout=timeout)
+
+    async def send(self, request, stream=False):
+        """Send a request and return a response."""
+        DummyAsyncClient.captured = {
+            "method": request.method,
+            "url": request.url,
+            "headers": request.headers,
+            "content": request.content,
+            "timeout": request.timeout,
+        }
+        return DummyResponse()
 
     async def request(self, method, url, headers=None, content=None, timeout=None):
         DummyAsyncClient.captured = {

@@ -279,6 +279,12 @@ def main():
     # dashboard command (TUI)
     subparsers.add_parser("dashboard", help="Open interactive TUI dashboard")
 
+    # logs command
+    logs_parser = subparsers.add_parser("logs", help="Tail router logs")
+    logs_parser.add_argument("-f", "--follow", action="store_true", help="Follow log output (like tail -f)")
+    logs_parser.add_argument("-n", "--lines", type=int, default=50, help="Number of lines to show (default: 50)")
+    logs_parser.add_argument("--clear", action="store_true", help="Clear log file")
+
     # install command
     install_parser = subparsers.add_parser("install", help="Run installer")
     install_parser.add_argument("--windows", action="store_true")
@@ -481,6 +487,10 @@ def main():
                 app = DevhostDashboard()
                 app.run()
                 success = True
+        elif args.command == "logs":
+            from .logs import cmd_logs
+
+            success = cmd_logs(follow=args.follow, lines=args.lines, clear=args.clear)
         elif args.command == "install":
             script_dir = Path(__file__).parent.parent.resolve()
             install_script = script_dir / "install.py"

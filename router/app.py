@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 try:
@@ -55,6 +55,48 @@ logging.basicConfig(
 )
 logger = logging.getLogger("devhost.router")
 START_TIME = time.time()
+
+# Configurable timeout (default 60s for debugging sessions)
+DEFAULT_TIMEOUT = int(os.getenv("DEVHOST_TIMEOUT", "60"))
+
+# Retry configuration for transient connection errors
+RETRY_ATTEMPTS = int(os.getenv("DEVHOST_RETRY_ATTEMPTS", "3"))
+RETRY_DELAY_MS = int(os.getenv("DEVHOST_RETRY_DELAY_MS", "500"))
+
+# HTML error page template with auto-refresh
+HTML_ERROR_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Devhost - {status_code}</title>
+    <meta http-equiv="refresh" content="3">
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+               display: flex; justify-content: center; align-items: center; height: 100vh;
+               margin: 0; background: #1a1a2e; color: #eee; }}
+        .container {{ text-align: center; padding: 2rem; }}
+        h1 {{ font-size: 4rem; margin: 0; color: #e94560; }}
+        p {{ color: #aaa; margin: 1rem 0; }}
+        .hint {{ background: #16213e; padding: 1rem; border-radius: 8px; margin-top: 1rem; }}
+        code {{ color: #0f9b0f; }}
+        .spinner {{ display: inline-block; width: 20px; height: 20px; border: 2px solid #444;
+                   border-top-color: #e94560; border-radius: 50%; animation: spin 1s linear infinite; }}
+        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{status_code}</h1>
+        <p>{message}</p>
+        <div class="hint">
+            <span class="spinner"></span>
+            <span>Auto-refreshing in 3 seconds...</span>
+        </div>
+        <p style="font-size: 0.8rem; color: #666;">Request ID: {request_id}</p>
+    </div>
+</body>
+</html>
+"""
 
 
 class Metrics:
@@ -209,6 +251,39 @@ class RouteCache:
 
 
 ROUTE_CACHE = RouteCache()
+
+
+def wants_html(request: Request) -> bool:
+    """Check if client prefers HTML response (browser vs API client)."""
+    accept = request.headers.get("accept", "")
+    # Browsers typically send text/html first
+    return "text/html" in accept.split(",")[0] if accept else False
+
+
+def error_response(
+    request: Request,
+    status_code: int,
+    message: str,
+    request_id: str,
+    hint: str | None = None,
+) -> JSONResponse | HTMLResponse:
+    """Return smart error response based on Accept header.
+
+    - HTML clients (browsers) get a friendly page with auto-refresh
+    - API clients get JSON
+    """
+    if wants_html(request):
+        html = HTML_ERROR_TEMPLATE.format(
+            status_code=status_code,
+            message=message,
+            request_id=request_id,
+        )
+        return HTMLResponse(content=html, status_code=status_code)
+
+    error_data = {"error": message, "request_id": request_id}
+    if hint:
+        error_data["hint"] = hint
+    return JSONResponse(error_data, status_code=status_code)
 
 
 def parse_target(value) -> tuple[str, int, str] | None:
@@ -435,27 +510,47 @@ async def websocket_proxy(websocket: WebSocket, full_path: str):
 @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def wildcard_proxy(request: Request, full_path: str):
     routes = await ROUTE_CACHE.get_routes()
+    request_id = str(uuid.uuid4())[:8]
 
     host_header = request.headers.get("host", "")
     base_domain = load_domain()
     subdomain = extract_subdomain(host_header, base_domain)
     if not subdomain:
-        request_id = str(uuid.uuid4())[:8]
         if host_header in {"127.0.0.1:7777", "localhost:7777", "127.0.0.1", "localhost", ""}:
             logger.info("[%s] Direct router access without Host header: %s", request_id, host_header)
-            return JSONResponse(
-                {
-                    "error": "Missing or invalid Host header",
-                    "hint": "Use devhost open <name> or send Host header (e.g. curl -H 'Host: hello.localhost' http://127.0.0.1:7777/)",
-                    "request_id": request_id,
-                },
-                status_code=400,
+            return error_response(
+                request,
+                400,
+                "Missing or invalid Host header",
+                request_id,
+                hint="Use devhost open <name> or send Host header (e.g. curl -H 'Host: hello.localhost' http://127.0.0.1:7777/)",
             )
         logger.warning("[%s] Invalid Host header: %s", request_id, host_header)
-        return JSONResponse({"error": "Missing or invalid Host header", "request_id": request_id}, status_code=400)
-headers = dict(request.headers)
-    # remove host header so upstream sees correct host
-    headers.pop("host", None)
+        return error_response(request, 400, "Missing or invalid Host header", request_id)
+
+    # Look up target route
+    target_value = routes.get(subdomain)
+    target = parse_target(target_value)
+    if not target:
+        logger.warning("[%s] No route found for %s.%s", request_id, subdomain, base_domain)
+        return error_response(request, 404, f"No route found for {subdomain}.{base_domain}", request_id)
+
+    # Build upstream URL
+    target_scheme, target_host, target_port = target
+    url = f"{target_scheme}://{target_host}:{target_port}/{full_path}"
+    if request.url.query:
+        url = f"{url}?{request.url.query}"
+
+    # Prepare headers with standard proxy headers
+    headers = dict(request.headers)
+    original_host = headers.pop("host", host_header)
+
+    # Add standard proxy headers (X-Forwarded-*)
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    headers["X-Forwarded-For"] = headers.get("x-forwarded-for", client_ip)
+    headers["X-Forwarded-Host"] = original_host
+    headers["X-Forwarded-Proto"] = request.url.scheme or "http"
+    headers["X-Real-IP"] = client_ip
 
     # Use globally shared client
     global http_client
@@ -463,26 +558,52 @@ headers = dict(request.headers)
     if http_client is None:
         http_client = httpx.AsyncClient()
 
-    async def request_body_stream():
-        async for chunk in request.stream():
-            yield chunk
+    # Stream request body (cache for retries)
+    body_chunks: list[bytes] = []
+    async for chunk in request.stream():
+        body_chunks.append(chunk)
+    body_content = b"".join(body_chunks)
 
-    req = http_client.build_request(
-        method=request.method,
-        url=url,
-        headers=headers,
-        content=request_body_stream(),
-        timeout=30.0,
-    )
-
-    try:
-        upstream_resp = await http_client.send(req, stream=True)
-    except httpx.RequestError as exc:
-        request_id = str(uuid.uuid4())[:8]
+    # Retry loop for transient connection errors (server restarting)
+    last_error: Exception | None = None
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            req = http_client.build_request(
+                method=request.method,
+                url=url,
+                headers=headers,
+                content=body_content,
+                timeout=float(DEFAULT_TIMEOUT),
+            )
+            upstream_resp = await http_client.send(req, stream=True)
+            break  # Success - exit retry loop
+        except httpx.ConnectError as exc:
+            # Connection refused - server might be restarting
+            last_error = exc
+            if attempt < RETRY_ATTEMPTS - 1:
+                logger.debug(
+                    "[%s] Connection refused (attempt %d/%d), retrying in %dms...",
+                    request_id, attempt + 1, RETRY_ATTEMPTS, RETRY_DELAY_MS
+                )
+                await asyncio.sleep(RETRY_DELAY_MS / 1000.0)
+            continue
+        except httpx.RequestError as exc:
+            # Other request errors - don't retry
+            logger.warning(
+                "[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc
+            )
+            return error_response(
+                request, 502, f"Upstream server unavailable: {type(exc).__name__}", request_id
+            )
+    else:
+        # All retries exhausted
         logger.warning(
-            "[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc
+            "[%s] Upstream connection failed after %d attempts for %s.%s -> %s: %s",
+            request_id, RETRY_ATTEMPTS, subdomain, base_domain, url, last_error
         )
-        return JSONResponse({"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502)
+        return error_response(
+            request, 502, f"Upstream server not responding (tried {RETRY_ATTEMPTS} times)", request_id
+        )
 
     # Filter hop-by-hop headers
     excluded = {
@@ -495,32 +616,17 @@ headers = dict(request.headers)
         "transfer-encoding",
         "upgrade",
         "content-encoding",  # Let upstream handle encoding, or httpx might decompress
-        "content-length",    # Length changes if we process it
+        "content-length",  # Length changes if we process it
     }
     resp_headers = {k: v for k, v in upstream_resp.headers.items() if k.lower() not in excluded}
 
+    # Stream response back to client
     return StreamingResponse(
         upstream_resp.aiter_bytes(),
         status_code=upstream_resp.status_code,
         headers=resp_headers,
         background=BackgroundTask(upstream_resp.aclose),
-    
-            return JSONResponse({"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502)
-
-    # Filter hop-by-hop headers
-    excluded = {
-        "connection",
-        "keep-alive",
-        "proxy-authenticate",
-        "proxy-authorization",
-        "te",
-        "trailers",
-        "transfer-encoding",
-        "upgrade",
-    }
-    resp_headers = {k: v for k, v in proxy_resp.headers.items() if k.lower() not in excluded}
-
-    return Response(content=proxy_resp.content, status_code=proxy_resp.status_code, headers=resp_headers)
+    )
 
 
 if __name__ == "__main__":

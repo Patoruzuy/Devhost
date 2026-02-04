@@ -17,6 +17,44 @@ def hosts_path() -> Path:
     return Path(system_root) / "System32" / "drivers" / "etc" / "hosts"
 
 
+def hosts_backup() -> Path | None:
+    """Create a backup of the hosts file before modification.
+
+    Returns the backup path if successful, None otherwise.
+    Prevents catastrophic networking issues from hosts file corruption.
+    """
+    path = hosts_path()
+    if not path.exists():
+        return None
+    backup_path = path.with_suffix(".bak")
+    try:
+        content = path.read_text(encoding="ascii", errors="ignore")
+        backup_path.write_text(content, encoding="ascii")
+        return backup_path
+    except PermissionError:
+        # Running without admin - can't backup, but that also means can't modify
+        return None
+    except Exception:
+        return None
+
+
+def hosts_restore() -> bool:
+    """Restore hosts file from backup.
+
+    Returns True if restore was successful.
+    """
+    path = hosts_path()
+    backup_path = path.with_suffix(".bak")
+    if not backup_path.exists():
+        return False
+    try:
+        content = backup_path.read_text(encoding="ascii", errors="ignore")
+        path.write_text(content, encoding="ascii")
+        return True
+    except Exception:
+        return False
+
+
 def hosts_add(hostname: str) -> None:
     """Add hostname to Windows hosts file"""
     if not hostname:
@@ -29,6 +67,8 @@ def hosts_add(hostname: str) -> None:
         line.strip().startswith("127.0.0.1") and hostname in line and "devhost" in line for line in content.splitlines()
     ):
         return
+    # Backup before modifying
+    hosts_backup()
     with path.open("a", encoding="ascii") as fh:
         fh.write(f"\n127.0.0.1 {hostname} # devhost")
 
@@ -40,6 +80,8 @@ def hosts_remove(hostname: str) -> None:
     path = hosts_path()
     if not path.exists():
         return
+    # Backup before modifying
+    hosts_backup()
     lines = path.read_text(encoding="ascii", errors="ignore").splitlines()
     filtered = [line for line in lines if not (hostname in line and "devhost" in line)]
     path.write_text("\n".join(filtered) + ("\n" if filtered else ""), encoding="ascii")
@@ -62,6 +104,8 @@ def hosts_clear() -> None:
     if not path.exists():
         msg_warning("Hosts file not found.")
         return
+    # Backup before modifying
+    hosts_backup()
     lines = path.read_text(encoding="ascii", errors="ignore").splitlines()
     filtered = [line for line in lines if "devhost" not in line]
     path.write_text("\n".join(filtered) + ("\n" if filtered else ""), encoding="ascii")
