@@ -225,6 +225,27 @@ devhost/
 ├── examples/             # Usage examples
 ├── caddy/                # Caddy configuration
 └── completions/          # Shell completions
+└──devhost_cli/     # CLI package
+    ├── cli.py            # Core CLI commands (add, remove, list)
+    ├── config.py         # Legacy config handling (devhost.json)
+    ├── state.py          # v3 state management (~/.devhost/state.yml)
+    ├── caddy.py          # Caddy lifecycle management
+    ├── tunnel.py         # cloudflared/ngrok/localtunnel integration
+    ├── runner.py         # Framework app runner
+    ├── router_manager.py # Router process management
+    ├── validation.py     # Target/port validation
+    ├── platform.py       # Platform detection
+    └── windows.py        # Windows-specific helpers
+└── devhost_tui/          # TUI dashboard package
+    └── app.py            # TUI dashboard implementation
+    └── modals.py         # TUI data models
+    └── scanners.py       # TUI scanning utilities
+    └── widgets.py        # TUI custom widgets
+└── router/               # FastAPI router app
+    ├── app.py            # FastAPI proxy with WebSocket support
+    ├── requirements.txt  # Router dependencies (httpx, websockets)
+    └── Dockerfile        # Container build (port 7777)
+
 ```
 
 ## Getting Help

@@ -67,8 +67,22 @@ No ambiguity. Each mode has a clear, concrete outcome.
 ### Installation
 
 ```bash
+# Core installation
 pip install devhost
+
+# With optional dependencies
+pip install devhost[flask]      # Flask integration
+pip install devhost[fastapi]    # FastAPI integration  
+pip install devhost[django]     # Django integration
+pip install devhost[tui]        # Interactive dashboard (optional, uninstall anytime)
+pip install devhost[qr]         # QR code generation
+pip install devhost[tunnel]     # Tunnel providers (cloudflared, ngrok, localtunnel)
+
+# Install everything
+pip install devhost[all]
 ```
+
+> **Note**: The TUI dashboard is completely optional. Install with `pip install devhost[tui]` when you need it, uninstall with `pip uninstall textual psutil` when you don't. The CLI works independently.
 
 ### Add Your First Route
 
@@ -140,6 +154,58 @@ devhost add frontend 3000    # http://frontend.localhost:7777
 devhost add api 8000         # http://api.localhost:7777
 devhost add admin 4200       # http://admin.localhost:7777
 ```
+
+**Developer Benefits** (concrete friction removers):
+
+1. **OAuth/OIDC Redirect URIs**
+   - Problem: OAuth providers require exact URLs
+   - Solution: Use stable subdomain URLs instead of changing ports
+   - Example: `http://auth.localhost:7777/callback` always works
+
+2. **Cookie Domain Isolation**
+   - Problem: Cookies on `localhost:3000` leak to `localhost:8080`
+   - Solution: `web.localhost` and `api.localhost` are separate domains
+   - Benefit: No cross-app auth bugs
+
+3. **SameSite Cookie Policy**
+   - Problem: Modern browsers block third-party cookies on `localhost:PORT`
+   - Solution: Subdomains enable proper SameSite testing
+   - Benefit: Match production cookie behavior
+
+4. **CORS Testing**
+   - Problem: CORS doesn't trigger on same `localhost:PORT`
+   - Solution: Different subdomains = real CORS scenarios
+   - Benefit: Catch CORS issues before production
+
+5. **Service Worker Scope**
+   - Problem: Service workers scope to `localhost:PORT`
+   - Solution: Subdomains provide clean scope isolation
+   - Benefit: Test PWA features properly
+
+6. **Mobile Device Testing**
+   - Problem: Mobile can't hit `localhost:PORT`
+   - Solution: Single gateway port + LAN access = easy testing
+   - Benefit: Test on real devices without complex setup
+
+7. **Multi-Tenant Development**
+   - Problem: Testing tenant isolation with ports is messy
+   - Solution: `tenant1.localhost:7777`, `tenant2.localhost:7777`
+   - Benefit: Realistic multi-tenant scenarios
+
+8. **Microservices Architecture**
+   - Problem: Remembering 10+ ports for different services
+   - Solution: Memorable names: `api.localhost`, `auth.localhost`, `payments.localhost`
+   - Benefit: Single port to remember (7777), names are semantic
+
+9. **TLS/HTTPS Matching**
+   - Problem: Can't test HTTPS redirects with bare `localhost:PORT`
+   - Solution: Subdomains work with local TLS certificates
+   - Benefit: Match production HTTPS behavior
+
+10. **Browser DevTools**
+    - Problem: Network tab full of `localhost:XXXX` requests
+    - Solution: Filter by subdomain for cleaner debugging
+    - Benefit: Faster issue diagnosis, less cognitive load
 
 ### Mode 2: System Proxy
 
@@ -300,21 +366,32 @@ Supported providers:
 - **ngrok** — Popular tunneling service
 - **localtunnel** — npm-based alternative
 
-## 🖥️ TUI Dashboard
+## 🖥️ TUI Dashboard (Optional)
+
+**The dashboard is completely optional** — install only when you need a visual interface. The CLI works independently.
 
 Launch the interactive terminal dashboard:
 
 ```bash
+# Install (only when needed)
 pip install devhost[tui]
+
+# Run
 devhost dashboard
+
+# Uninstall (anytime)
+pip uninstall textual psutil
 ```
 
 Features:
 - Live route status with health indicators
 - Add/remove routes interactively
 - Ghost port detection (find running dev servers)
+- Integrity drift detection
+- Visual flow diagrams
 - Log tailing
-- Emergency reset
+- Emergency reset (safety boundaries enforced)
+- Profile switching for multi-context workflows
 
 ## 📱 Mobile Access
 
