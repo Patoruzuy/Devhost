@@ -155,57 +155,17 @@ devhost add api 8000         # http://api.localhost:7777
 devhost add admin 4200       # http://admin.localhost:7777
 ```
 
-**Developer Benefits** (concrete friction removers):
+**Key Benefits** (why use a gateway?):
 
-1. **OAuth/OIDC Redirect URIs**
-   - Problem: OAuth providers require exact URLs
-   - Solution: Use stable subdomain URLs instead of changing ports
-   - Example: `http://auth.localhost:7777/callback` always works
+1. **Microservices Made Easy** — Remembering 10+ ports is cognitive overhead. Use `api.localhost`, `auth.localhost`, `payments.localhost` — single port (7777), semantic names.
 
-2. **Cookie Domain Isolation**
-   - Problem: Cookies on `localhost:3000` leak to `localhost:8080`
-   - Solution: `web.localhost` and `api.localhost` are separate domains
-   - Benefit: No cross-app auth bugs
+2. **OAuth/OIDC That Just Works** — OAuth providers need exact URLs. `http://auth.localhost:7777/callback` never changes, even when your app port does.
 
-3. **SameSite Cookie Policy**
-   - Problem: Modern browsers block third-party cookies on `localhost:PORT`
-   - Solution: Subdomains enable proper SameSite testing
-   - Benefit: Match production cookie behavior
+3. **Cookie Domain Isolation** — Cookies on `localhost:3000` leak to `localhost:8080`, causing weird auth bugs. `web.localhost` and `api.localhost` are separate domains.
 
-4. **CORS Testing**
-   - Problem: CORS doesn't trigger on same `localhost:PORT`
-   - Solution: Different subdomains = real CORS scenarios
-   - Benefit: Catch CORS issues before production
+4. **Real CORS Testing** — CORS doesn't trigger on same `localhost:PORT`. Different subdomains = catch CORS issues before production.
 
-5. **Service Worker Scope**
-   - Problem: Service workers scope to `localhost:PORT`
-   - Solution: Subdomains provide clean scope isolation
-   - Benefit: Test PWA features properly
-
-6. **Mobile Device Testing**
-   - Problem: Mobile can't hit `localhost:PORT`
-   - Solution: Single gateway port + LAN access = easy testing
-   - Benefit: Test on real devices without complex setup
-
-7. **Multi-Tenant Development**
-   - Problem: Testing tenant isolation with ports is messy
-   - Solution: `tenant1.localhost:7777`, `tenant2.localhost:7777`
-   - Benefit: Realistic multi-tenant scenarios
-
-8. **Microservices Architecture**
-   - Problem: Remembering 10+ ports for different services
-   - Solution: Memorable names: `api.localhost`, `auth.localhost`, `payments.localhost`
-   - Benefit: Single port to remember (7777), names are semantic
-
-9. **TLS/HTTPS Matching**
-   - Problem: Can't test HTTPS redirects with bare `localhost:PORT`
-   - Solution: Subdomains work with local TLS certificates
-   - Benefit: Match production HTTPS behavior
-
-10. **Browser DevTools**
-    - Problem: Network tab full of `localhost:XXXX` requests
-    - Solution: Filter by subdomain for cleaner debugging
-    - Benefit: Faster issue diagnosis, less cognitive load
+[See all 10 benefits](BENEFITS.md#mode-1-gateway-default) including SameSite cookies, Service Workers, mobile testing, TLS/HTTPS matching, and more.
 
 ### Mode 2: System Proxy
 
@@ -216,57 +176,17 @@ devhost proxy upgrade --to system
 # Now: http://myapp.localhost (no port!)
 ```
 
-**Developer Benefits** (production parity):
+**Key Benefits** (production parity):
 
-1. **Production URL Matching**
-   - Problem: Production uses `app.example.com`, dev uses `localhost:3000`
-   - Solution: `app.localhost` mirrors production URL structure
-   - Benefit: Catch URL-dependent bugs early
+1. **Production URL Matching** — Production uses `app.example.com`, dev uses `localhost:3000`? Use `app.localhost` to mirror production URL structure and catch bugs early.
 
-2. **Hardcoded URL Detection**
-   - Problem: Code with hardcoded ports breaks in production
-   - Solution: Portless URLs expose hardcoded dependencies
-   - Benefit: Force proper configuration management
+2. **IoT & Home Lab Access** — Raspberry Pi at `192.168.1.50:8080`, NAS at `192.168.1.100:5000`? Use `http://homelab.localhost` and `http://nas.localhost` — forget IPs and ports across your local network.
 
-3. **Browser Extension Testing**
-   - Problem: Extensions often reject `localhost:PORT` URLs
-   - Solution: Standard ports (80/443) match extension expectations
-   - Benefit: Test browser extensions realistically
+3. **Third-Party Integrations** — Payment/auth providers whitelist domains without ports. `payments.localhost` (no port) matches their requirements for realistic local testing.
 
-4. **CDN/Asset Simulation**
-   - Problem: Production serves assets from CDN on port 443
-   - Solution: Local HTTPS on port 443 matches production behavior
-   - Benefit: Catch mixed-content warnings
+4. **Professional Demos** — Showing `:7777` in URLs looks unprofessional. Clean portless URLs look production-ready for client presentations.
 
-5. **Third-Party Integration**
-   - Problem: Payment/auth providers whitelist domains without ports
-   - Solution: `payments.localhost` (no port) matches their requirements
-   - Benefit: Test real integrations locally
-
-6. **Mobile App API Testing**
-   - Problem: Mobile apps expect standard ports
-   - Solution: Configure app to hit `api.localhost` (port 80/443)
-   - Benefit: No app reconfiguration between dev/prod
-
-7. **Demo/Presentation Mode**
-   - Problem: Showing `:7777` in URLs looks unprofessional
-   - Solution: Clean URLs look production-ready
-   - Benefit: Better client demos
-
-8. **Subdomain Cookie Wildcards**
-   - Problem: Production sets cookies on `*.example.com`
-   - Solution: Test with `*.localhost` on standard ports
-   - Benefit: Match production cookie behavior exactly
-
-9. **SSL/TLS Certificate Testing**
-   - Problem: Self-signed certs often fail on non-standard ports
-   - Solution: Port 443 matches production certificate expectations
-   - Benefit: Realistic HTTPS testing
-
-10. **Developer Muscle Memory**
-    - Problem: Constantly typing `:7777` is cognitive overhead
-    - Solution: Just type the domain, browser defaults to port 80
-    - Benefit: Faster workflow, less mental friction
+[See all 11 benefits](BENEFITS.md#mode-2-system-portless-urls) including hardcoded URL detection, browser extensions, mobile app testing, SSL/TLS certificates, and more.
 
 ### Mode 3: External Proxy
 
@@ -278,57 +198,17 @@ devhost proxy export nginx    # Generate nginx config
 devhost proxy attach caddy    # Attach to existing Caddyfile
 ```
 
-**Developer Benefits** (infrastructure integration):
+**Key Benefits** (brownfield integration):
 
-1. **Brownfield Integration**
-   - Problem: You already have nginx/Traefik managing 50+ routes
-   - Solution: Generate snippets, don't replace your entire setup
-   - Benefit: Adopt Devhost incrementally without migration risk
+1. **Incremental Adoption** — Already have nginx/Traefik managing 50+ routes? Generate snippets, don't replace your entire setup. Zero migration risk.
 
-2. **Team Configuration Consistency**
-   - Problem: Each developer configures their proxy differently
-   - Solution: Export canonical snippets from Devhost state
-   - Benefit: Team-wide routing consistency
+2. **Configuration Drift Detection** — Manual edits break Devhost-generated routes? Integrity checking warns when snippets diverge, so you know exactly when manual changes conflict.
 
-3. **Custom Proxy Features**
-   - Problem: Need advanced features (rate limiting, auth middleware)
-   - Solution: Devhost generates base config, you add custom logic
-   - Benefit: Leverage existing proxy expertise
+3. **Zero Trust Required** — Worried Devhost will break your proxy? Export-only mode never touches your files. Review generated config before applying.
 
-4. **Multi-Environment Parity**
-   - Problem: Dev proxy doesn't match staging/production setup
-   - Solution: Use same proxy (nginx/Traefik) across all environments
-   - Benefit: "Works on my machine" bugs eliminated
+4. **Emergency Escape Hatch** — Devhost breaks, need to revert immediately? Detach removes only marked sections, preserves the rest. Safe experimentation with quick rollback.
 
-5. **Configuration Drift Detection**
-   - Problem: Manual edits break Devhost-generated routes
-   - Solution: Integrity checking warns when snippets diverge
-   - Benefit: Know exactly when manual changes conflict
-
-6. **Zero Trust Required**
-   - Problem: Worried Devhost will break your proxy setup?
-   - Solution: Export-only mode never touches your files
-   - Benefit: Review generated config before applying
-
-7. **Emergency Escape Hatch**
-   - Problem: Devhost breaks, need to revert immediately
-   - Solution: Detach removes only marked sections, preserves rest
-   - Benefit: Safe experimentation with quick rollback
-
-8. **Legacy System Compatibility**
-   - Problem: Corporate proxy with strict config requirements
-   - Solution: Generate compliant snippets matching your standards
-   - Benefit: Works within existing constraints
-
-9. **Documentation as Code**
-   - Problem: Proxy config comments get stale or lost
-   - Solution: Devhost state is canonical, generates fresh snippets
-   - Benefit: Config always matches documented routes
-
-10. **Gradual Adoption Path**
-    - Problem: Can't commit to new tools without trial period
-    - Solution: Export → Manual review → Attach → Verify → Adopt
-    - Benefit: Low-risk evaluation with clear rollback steps
+[See all 10 benefits](BENEFITS.md#mode-3-external-infrastructure-integration) including team consistency, custom features, multi-environment parity, legacy compatibility, and more.
 
 ## 📋 CLI Reference
 
