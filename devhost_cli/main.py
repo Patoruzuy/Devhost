@@ -258,6 +258,24 @@ def main():
     proxy_transfer_parser.add_argument("--no-verify", action="store_true", help="Skip route verification")
     proxy_transfer_parser.add_argument("--port", "-p", type=int, default=80, help="Proxy port (default: 80)")
 
+    # tunnel command (Phase 6: expose local services to internet)
+    tunnel_parser = subparsers.add_parser("tunnel", help="Tunnel management (expose to internet)")
+    tunnel_subparsers = tunnel_parser.add_subparsers(dest="tunnel_action", help="Tunnel action")
+
+    # tunnel start
+    tunnel_start_parser = tunnel_subparsers.add_parser("start", help="Start tunnel for a route")
+    tunnel_start_parser.add_argument("name", nargs="?", help="Route name (uses first if omitted)")
+    tunnel_start_parser.add_argument(
+        "--provider", "-p", choices=["cloudflared", "ngrok", "localtunnel"], help="Tunnel provider"
+    )
+
+    # tunnel stop
+    tunnel_stop_parser = tunnel_subparsers.add_parser("stop", help="Stop tunnel")
+    tunnel_stop_parser.add_argument("name", nargs="?", help="Route name (stops all if omitted)")
+
+    # tunnel status
+    tunnel_subparsers.add_parser("status", help="Show active tunnels")
+
     # dashboard command (TUI)
     subparsers.add_parser("dashboard", help="Open interactive TUI dashboard")
 
@@ -440,6 +458,18 @@ def main():
                 msg_info(
                     "Usage: devhost proxy {start|stop|status|reload|upgrade|export|discover|attach|detach|transfer}"
                 )
+                success = True
+        elif args.command == "tunnel":
+            from .tunnel import cmd_tunnel_start, cmd_tunnel_status, cmd_tunnel_stop
+
+            if args.tunnel_action == "start":
+                success = cmd_tunnel_start(args.name, args.provider)
+            elif args.tunnel_action == "stop":
+                success = cmd_tunnel_stop(args.name)
+            elif args.tunnel_action == "status":
+                success = cmd_tunnel_status()
+            else:
+                msg_info("Usage: devhost tunnel {start|stop|status}")
                 success = True
         elif args.command == "dashboard":
             try:

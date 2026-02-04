@@ -11,6 +11,7 @@ from pathlib import Path
 from .config import Config
 from .output import console, print_error, print_info, print_success, print_warning
 from .state import StateConfig
+from .validation import get_dev_scheme
 
 # Common OAuth callback paths
 OAUTH_CALLBACK_PATHS = [
@@ -82,7 +83,7 @@ def detect_oauth_libraries() -> list[str]:
     return detected
 
 
-def get_oauth_uris(name: str, domain: str = "localhost", port: int | None = None) -> list[str]:
+def get_oauth_uris(name: str, domain: str = "localhost", port: int | None = None, scheme: str = "http") -> list[str]:
     """
     Generate OAuth redirect URIs for a given app.
 
@@ -90,21 +91,28 @@ def get_oauth_uris(name: str, domain: str = "localhost", port: int | None = None
         name: App name (subdomain)
         domain: Base domain
         port: Optional port (for gateway mode)
+        scheme: URL scheme to use (http or https)
 
     Returns:
         List of OAuth redirect URIs
     """
     if port:
-        base_url = f"http://{name}.{domain}:{port}"
+        base_url = f"{scheme}://{name}.{domain}:{port}"
     else:
-        base_url = f"http://{name}.{domain}"
+        base_url = f"{scheme}://{name}.{domain}"
 
     return [f"{base_url}{path}" for path in OAUTH_CALLBACK_PATHS]
 
 
-def print_oauth_uris(name: str, domain: str = "localhost", port: int | None = None, framework: str | None = None):
+def print_oauth_uris(
+    name: str,
+    domain: str = "localhost",
+    port: int | None = None,
+    framework: str | None = None,
+    scheme: str = "http",
+):
     """Print OAuth redirect URIs with Rich formatting."""
-    uris = get_oauth_uris(name, domain, port)
+    uris = get_oauth_uris(name, domain, port, scheme)
     detected_libs = detect_oauth_libraries()
 
     console.print()
@@ -112,9 +120,9 @@ def print_oauth_uris(name: str, domain: str = "localhost", port: int | None = No
         console.print(f"[bold cyan]Framework:[/bold cyan] {framework}")
 
     if port:
-        console.print(f"[bold cyan]Access URL:[/bold cyan] http://{name}.{domain}:{port}")
+        console.print(f"[bold cyan]Access URL:[/bold cyan] {scheme}://{name}.{domain}:{port}")
     else:
-        console.print(f"[bold cyan]Access URL:[/bold cyan] http://{name}.{domain}")
+        console.print(f"[bold cyan]Access URL:[/bold cyan] {scheme}://{name}.{domain}")
 
     console.print()
     console.print("[bold yellow]OAuth Redirect URIs:[/bold yellow]")
@@ -192,6 +200,7 @@ def show_qr_for_route(name: str | None = None):
 
     # Get route details
     target = routes[name]
+    scheme = get_dev_scheme(target)
 
     # Parse port from target
     port = None
@@ -217,7 +226,7 @@ def show_qr_for_route(name: str | None = None):
         lan_ip = "localhost"
 
     # Generate URL for mobile access (direct to port, not through proxy)
-    mobile_url = f"http://{lan_ip}:{port}"
+    mobile_url = f"{scheme}://{lan_ip}:{port}"
 
     console.print()
     console.print(f"[bold cyan]QR Code for:[/bold cyan] {name}")
@@ -273,11 +282,12 @@ def sync_env_file(name: str | None = None, env_file: str = ".env", dry_run: bool
     domain = config.get_domain()
     mode = state.proxy_mode
     port = state.gateway_port
+    scheme = get_dev_scheme(routes[name])
 
     if mode == "gateway":
-        url = f"http://{name}.{domain}:{port}"
+        url = f"{scheme}://{name}.{domain}:{port}"
     else:
-        url = f"http://{name}.{domain}"
+        url = f"{scheme}://{name}.{domain}"
 
     # Variables to sync
     updates = {
@@ -376,11 +386,12 @@ def show_oauth_for_route(name: str | None = None):
 
     domain = config.get_domain()
     mode = state.proxy_mode
+    scheme = get_dev_scheme(routes[name])
 
     if mode == "gateway":
         port = state.gateway_port
-        print_oauth_uris(name, domain, port)
+        print_oauth_uris(name, domain, port, scheme=scheme)
     else:
-        print_oauth_uris(name, domain)
+        print_oauth_uris(name, domain, scheme=scheme)
 
     return True

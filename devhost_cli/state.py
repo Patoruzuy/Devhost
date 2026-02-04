@@ -330,6 +330,31 @@ class StateConfig:
         self._save()
 
     # ─────────────────────────────────────────────────────────────
+    # Tunnel Management
+    # ─────────────────────────────────────────────────────────────
+
+    def get_active_tunnel(self, route_name: str) -> dict | None:
+        """Get active tunnel info for a route"""
+        return self._state.get("tunnels", {}).get(route_name)
+
+    def get_all_tunnels(self) -> dict[str, dict]:
+        """Get all active tunnels"""
+        return self._state.get("tunnels", {}).copy()
+
+    def set_tunnel(self, route_name: str, tunnel_info: dict):
+        """Record a tunnel for a route"""
+        self._state.setdefault("tunnels", {})[route_name] = tunnel_info
+        self._save()
+
+    def remove_tunnel(self, route_name: str) -> bool:
+        """Remove a tunnel record"""
+        if route_name in self._state.get("tunnels", {}):
+            del self._state["tunnels"][route_name]
+            self._save()
+            return True
+        return False
+
+    # ─────────────────────────────────────────────────────────────
     # Raw State Access (for advanced use)
     # ─────────────────────────────────────────────────────────────
 

@@ -9,8 +9,16 @@ from urllib.parse import urlparse
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
+
+try:
+    import websockets
+    from websockets.exceptions import ConnectionClosed
+
+    WEBSOCKETS_AVAILABLE = True
+except ImportError:
+    WEBSOCKETS_AVAILABLE = False
 
 app = FastAPI()
 
@@ -314,6 +322,98 @@ async def mappings():
             healthy = bool(status is True)
             results[names[idx]]["healthy"] = healthy
     return JSONResponse({"domain": load_domain(), "mappings": results})
+
+
+# WebSocket proxy endpoint
+@app.websocket("/{full_path:path}")
+async def websocket_proxy(websocket: WebSocket, full_path: str):
+    """Proxy WebSocket connections to upstream servers."""
+    if not WEBSOCKETS_AVAILABLE:
+        await websocket.close(code=1011, reason="WebSocket proxying not available")
+        return
+
+    routes = await ROUTE_CACHE.get_routes()
+
+    # Extract subdomain from headers
+    host_header = None
+    for header in websocket.headers.raw:
+        if header[0].lower() == b"host":
+            host_header = header[1].decode("utf-8")
+            break
+
+    base_domain = load_domain()
+    subdomain = extract_subdomain(host_header, base_domain)
+
+    if not subdomain:
+        await websocket.close(code=1008, reason="Missing or invalid Host header")
+        return
+
+    target_value = routes.get(subdomain)
+    target = parse_target(target_value)
+    if not target:
+        await websocket.close(code=1008, reason=f"No route found for {subdomain}.{base_domain}")
+        return
+
+    target_scheme, target_host, target_port = target
+    ws_scheme = "wss" if target_scheme == "https" else "ws"
+    upstream_url = f"{ws_scheme}://{target_host}:{target_port}/{full_path}"
+
+    # Add query string if present
+    if websocket.url.query:
+        upstream_url = f"{upstream_url}?{websocket.url.query}"
+
+    request_id = str(uuid.uuid4())[:8]
+    logger.info("[%s] WebSocket connection: %s.%s -> %s", request_id, subdomain, base_domain, upstream_url)
+
+    await websocket.accept()
+
+    try:
+        async with websockets.connect(upstream_url) as upstream_ws:
+            # Create tasks for bidirectional communication
+            async def client_to_upstream():
+                try:
+                    while True:
+                        data = await websocket.receive()
+                        if "text" in data:
+                            await upstream_ws.send(data["text"])
+                        elif "bytes" in data:
+                            await upstream_ws.send(data["bytes"])
+                except WebSocketDisconnect:
+                    pass
+
+            async def upstream_to_client():
+                try:
+                    async for message in upstream_ws:
+                        if isinstance(message, str):
+                            await websocket.send_text(message)
+                        else:
+                            await websocket.send_bytes(message)
+                except ConnectionClosed:
+                    pass
+
+            # Run both directions concurrently
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.create_task(client_to_upstream()),
+                    asyncio.create_task(upstream_to_client()),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            # Cancel pending tasks
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    except Exception as exc:
+        logger.warning("[%s] WebSocket proxy error: %s", request_id, exc)
+        try:
+            await websocket.close(code=1011, reason="Upstream connection failed")
+        except Exception:
+            pass
 
 
 @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
