@@ -180,7 +180,7 @@ class DevhostRunner:
         self.registered_name = resolved_name
         self.registered_port = self.port
 
-        msg_success(f"Registered: {resolved_name}.{self.domain} → 127.0.0.1:{self.port}")
+        msg_success(f"Registered: {resolved_name}.{self.domain} -> 127.0.0.1:{self.port}")
 
     def unregister(self):
         """Remove route from global devhost.json on exit"""

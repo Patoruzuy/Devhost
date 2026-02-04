@@ -186,8 +186,12 @@ def main():
     subparsers.add_parser("stop", help="Stop router process")
 
     # status command
-    status_parser = subparsers.add_parser("status", help="Check router status")
+    status_parser = subparsers.add_parser("status", help="Show current mode and health summary")
     status_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # integrity command
+    integrity_parser = subparsers.add_parser("integrity", help="Check file integrity")
+    integrity_parser.add_argument("action", nargs="?", default="check", choices=["check"], help="Integrity action")
 
     # install command
     install_parser = subparsers.add_parser("install", help="Run installer")
@@ -295,7 +299,12 @@ def main():
         elif args.command == "stop":
             success = cli.router.stop()
         elif args.command == "status":
-            success = cli.router.status(args.json)
+            if args.json:
+                success = cli.router.status(args.json)
+            else:
+                success = cli.status()
+        elif args.command == "integrity":
+            success = cli.integrity_check()
         elif args.command == "install":
             script_dir = Path(__file__).parent.parent.resolve()
             install_script = script_dir / "install.py"

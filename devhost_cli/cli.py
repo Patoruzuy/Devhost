@@ -9,8 +9,10 @@ from pathlib import Path
 
 from .caddy import edit_config, generate_caddyfile, print_caddyfile
 from .config import Config
+from .output import console, print_info, print_routes, print_success, print_warning
 from .platform import IS_WINDOWS, is_admin
 from .router_manager import Router
+from .state import StateConfig
 from .utils import Colors, msg_error, msg_info, msg_step, msg_success, msg_warning
 from .validation import get_dev_scheme, parse_target, validate_name
 from .windows import hosts_add, hosts_remove
@@ -157,7 +159,7 @@ class DevhostCLI:
         return True
 
     def list_mappings(self, json_output: bool = False):
-        """List all mappings"""
+        """List all mappings with Rich table output"""
         routes = self.config.load()
         domain = self.config.get_domain()
 
@@ -166,31 +168,40 @@ class DevhostCLI:
             return True
 
         if not routes:
-            msg_info("No mappings yet")
-            msg_info("Add one with: devhost add <name> <port>")
+            print_info("No mappings yet")
+            print_info("Add one with: devhost add <name> <port>")
             return True
 
-        print(f"\n{Colors.BLUE}Configured Routes:{Colors.RESET}\n")
-
-        for name, target in sorted(routes.items()):
+        # Convert legacy format to Rich-compatible format
+        rich_routes = {}
+        for name, target in routes.items():
             parsed = parse_target(str(target))
             if parsed:
                 scheme, host, port = parsed
-                url = f"{scheme}://{name}.{domain}"
-                target_str = f"{scheme}://{host}:{port}"
-
                 # Check if service is running
-                status = ""
-                if check_port_open(host, port, timeout=0.5):
-                    status = f"{Colors.GREEN}+{Colors.RESET}"
-                else:
-                    status = f"{Colors.RED}-{Colors.RESET}"
-
-                print(f"  {status} {Colors.BLUE}{url:30}{Colors.RESET} -> {target_str}")
+                is_running = check_port_open(host, port, timeout=0.5)
+                rich_routes[name] = {
+                    "upstream": f"{host}:{port}",
+                    "domain": domain,
+                    "enabled": is_running,
+                }
             else:
-                print(f"  ? {name}.{domain:30} -> {target} (invalid)")
+                rich_routes[name] = {
+                    "upstream": str(target),
+                    "domain": domain,
+                    "enabled": False,
+                }
 
-        print()
+        # Get state for mode info
+        try:
+            state = StateConfig()
+            mode = state.proxy_mode
+            port = state.gateway_port
+        except Exception:
+            mode = "gateway"
+            port = 7777
+
+        print_routes(rich_routes, domain, mode, port)
         return True
 
     def url(self, name: str | None = None):
@@ -333,26 +344,134 @@ class DevhostCLI:
         print()
         return True
 
+    def status(self):
+        """Show current mode and health summary with Rich styling"""
+        from .output import print_integrity, print_status
+
+        try:
+            state = StateConfig()
+            mode = state.proxy_mode
+            route_count = len(self.config.load())
+            gateway_port = state.gateway_port
+
+            # Check proxy health
+            running, pid = self.router.is_running()
+
+            # Check integrity
+            integrity_results = state.check_all_integrity()
+            integrity_issues = sum(1 for ok, _ in integrity_results.values() if not ok)
+
+            health_info = {
+                "proxy_running": running,
+                "proxy_pid": pid,
+                "integrity_issues": integrity_issues,
+            }
+
+            print_status(mode, route_count, gateway_port, health_info)
+
+            # Show integrity issues if any
+            if integrity_issues > 0:
+                print()
+                print_integrity(integrity_results)
+
+        except Exception as e:
+            msg_error(f"Failed to get status: {e}")
+            return False
+
+        return True
+
+    def integrity_check(self):
+        """Check integrity of all tracked files"""
+        from .output import print_integrity
+
+        try:
+            state = StateConfig()
+            results = state.check_all_integrity()
+
+            if not results:
+                print_info("No files are being tracked for integrity")
+                return True
+
+            print_integrity(results)
+
+            issues = sum(1 for ok, _ in results.values() if not ok)
+            if issues > 0:
+                print_warning(f"{issues} file(s) have changed since last recorded")
+            else:
+                print_success("All tracked files are intact")
+
+        except Exception as e:
+            msg_error(f"Failed to check integrity: {e}")
+            return False
+
+        return True
+
     def doctor(self):
-        """Run comprehensive diagnostics"""
-        print(f"\n{Colors.BLUE}Devhost Doctor{Colors.RESET}\n")
+        """Run comprehensive diagnostics with Rich output"""
+        from .output import print_doctor
+
+        checks = []
 
         # Platform info
-        print(f"Platform: {platform.system()} {platform.release()}")
-        print(f"Python: {sys.version.split()[0]}")
-        print()
+        console.print(f"[bold]Platform:[/bold] {platform.system()} {platform.release()}")
+        console.print(f"[bold]Python:[/bold] {sys.version.split()[0]}")
+        console.print()
 
-        # Run validation
-        self.validate()
+        # Config file check
+        config_file = Path(__file__).parent.parent.resolve() / "devhost.json"
+        if config_file.exists():
+            try:
+                self.config.load()
+                checks.append(("Config file", True, str(config_file)))
+            except Exception as e:
+                checks.append(("Config file", False, f"Invalid: {e}"))
+        else:
+            checks.append(("Config file", True, "Will be created on first use"))
 
-        # Router details
+        # Router check
         running, pid = self.router.is_running()
         if running:
-            msg_success(f"Router process: running{f' (pid {pid})' if pid else ''}")
-            msg_info(f"Logs: {self.router.log_file}")
+            checks.append(("Router", True, f"Running (pid {pid})" if pid else "Running"))
         else:
-            msg_error("Router process: not running")
+            checks.append(("Router", False, "Not running - start with: devhost start"))
 
+        # State file check
+        try:
+            state = StateConfig()
+            checks.append(("State file", True, str(state.state_file)))
+            checks.append(("Proxy mode", True, state.proxy_mode))
+        except Exception as e:
+            checks.append(("State file", False, str(e)))
+
+        # DNS check for first mapping
+        routes = self.config.load()
+        if routes:
+            name = sorted(routes.keys())[0]
+            domain = self.config.get_domain()
+            fqdn = f"{name}.{domain}"
+            try:
+                socket.gethostbyname(fqdn)
+                checks.append(("DNS resolution", True, f"{fqdn} resolves"))
+            except socket.gaierror:
+                checks.append(("DNS resolution", False, f"{fqdn} does not resolve"))
+        else:
+            checks.append(("DNS resolution", True, "No routes to check"))
+
+        # Integrity check
+        try:
+            state = StateConfig()
+            integrity_results = state.check_all_integrity()
+            issues = sum(1 for ok, _ in integrity_results.values() if not ok)
+            if issues > 0:
+                checks.append(("Integrity", False, f"{issues} file(s) modified"))
+            elif integrity_results:
+                checks.append(("Integrity", True, f"{len(integrity_results)} file(s) tracked"))
+            else:
+                checks.append(("Integrity", True, "No files tracked"))
+        except Exception:
+            checks.append(("Integrity", True, "Not configured"))
+
+        print_doctor(checks)
         print()
         return True
 
