@@ -46,3 +46,10 @@ devhost.egg-info/PKG-INFO
 devhost.egg-info/requires.txt
 devhost.egg-info/SOURCES.txt
 devhost.egg-info/top_level.txt
+ARCHITECTURE_REDESIGN.md
+.gitignore
+.github/prompts/PLan.md.prompt.md
+.gitignore
+Dashboard.md
+.github/prompts/plan-devhostV3Architecture.prompt.md
+PLAN.md

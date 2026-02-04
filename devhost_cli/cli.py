@@ -183,12 +183,14 @@ class DevhostCLI:
                 rich_routes[name] = {
                     "upstream": f"{host}:{port}",
                     "domain": domain,
+                    "scheme": scheme,
                     "enabled": is_running,
                 }
             else:
                 rich_routes[name] = {
                     "upstream": str(target),
                     "domain": domain,
+                    "scheme": get_dev_scheme(target),
                     "enabled": False,
                 }
 
@@ -356,6 +358,7 @@ class DevhostCLI:
 
             # Check proxy health
             running, pid = self.router.is_running()
+            proxy_health = self.router._check_health() if running else None
 
             # Check integrity
             integrity_results = state.check_all_integrity()
@@ -364,6 +367,7 @@ class DevhostCLI:
             health_info = {
                 "proxy_running": running,
                 "proxy_pid": pid,
+                "proxy_health": proxy_health,
                 "integrity_issues": integrity_issues,
             }
 

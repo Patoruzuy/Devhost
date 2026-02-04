@@ -258,6 +258,9 @@ def main():
     proxy_transfer_parser.add_argument("--no-verify", action="store_true", help="Skip route verification")
     proxy_transfer_parser.add_argument("--port", "-p", type=int, default=80, help="Proxy port (default: 80)")
 
+    # dashboard command (TUI)
+    subparsers.add_parser("dashboard", help="Open interactive TUI dashboard")
+
     # install command
     install_parser = subparsers.add_parser("install", help="Run installer")
     install_parser.add_argument("--windows", action="store_true")
@@ -437,6 +440,16 @@ def main():
                 msg_info(
                     "Usage: devhost proxy {start|stop|status|reload|upgrade|export|discover|attach|detach|transfer}"
                 )
+                success = True
+        elif args.command == "dashboard":
+            try:
+                from devhost_tui.app import DevhostDashboard
+            except ImportError:
+                msg_error("TUI dependencies not installed. Install with: pip install devhost[tui]")
+                success = False
+            else:
+                app = DevhostDashboard()
+                app.run()
                 success = True
         elif args.command == "install":
             script_dir = Path(__file__).parent.parent.resolve()

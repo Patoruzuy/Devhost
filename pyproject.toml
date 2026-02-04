@@ -39,6 +39,10 @@ dev = [
     "ruff ~= 0.14.14",
     "httpx ~= 0.27",
 ]
+tui = [
+    "textual >= 0.47.0",
+    "psutil >= 5.9",
+]
 qr = [
     "segno >= 1.6",
 ]

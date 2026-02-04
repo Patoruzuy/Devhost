@@ -1,5 +1,5 @@
 """
-Unified state management for Devhost v3.0
+Unified state management for Devhost CLI.
 
 Manages ~/.devhost/state.yml with:
 - Proxy mode configuration (off/gateway/system/external)

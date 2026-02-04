@@ -102,12 +102,13 @@ def routes_table(routes: dict, domain: str = "localhost", mode: str = "gateway",
     for name, config in routes.items():
         # Determine URL based on mode
         route_domain = config.get("domain", domain)
+        scheme = config.get("scheme") or "http"
         if mode == "gateway":
-            url = f"http://{name}.{route_domain}:{port}"
+            url = f"{scheme}://{name}.{route_domain}:{port}"
         elif mode == "system":
-            url = f"http://{name}.{route_domain}"
+            url = f"{scheme}://{name}.{route_domain}"
         elif mode == "external":
-            url = f"http://{name}.{route_domain}"
+            url = f"{scheme}://{name}.{route_domain}"
         else:
             url = "[dim](mode off)[/dim]"
 
@@ -154,8 +155,14 @@ def status_panel(mode: str, route_count: int, gateway_port: int = 7777, health_i
 
     # Health info
     if health_info:
-        if health_info.get("proxy_running"):
-            lines.append(Text.assemble(status_icon("running"), " Proxy running"))
+        proxy_running = health_info.get("proxy_running")
+        proxy_health = health_info.get("proxy_health")
+
+        if proxy_running:
+            if proxy_health is False:
+                lines.append(Text.assemble(status_icon("error"), " Proxy not responding"))
+            else:
+                lines.append(Text.assemble(status_icon("running"), " Proxy running"))
         else:
             lines.append(Text.assemble(status_icon("stopped"), " Proxy stopped"))
 
