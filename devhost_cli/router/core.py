@@ -153,12 +153,12 @@ def create_app() -> FastAPI:
         subdomain = extract_subdomain(host_header, base_domain)
         if not subdomain:
             request_id = str(uuid.uuid4())[:8]
-            if host_header in {"127.0.0.1:5555", "localhost:5555", "127.0.0.1", "localhost", ""}:
+            if host_header in {"127.0.0.1:7777", "localhost:7777", "127.0.0.1", "localhost", ""}:
                 logger.info("[%s] Direct router access without Host header: %s", request_id, host_header)
                 return JSONResponse(
                     {
                         "error": "Missing or invalid Host header",
-                        "hint": "Use devhost open <name> or send Host header (e.g. curl -H 'Host: hello.localhost' http://127.0.0.1:5555/)",
+                        "hint": "Use devhost open <name> or send Host header (e.g. curl -H 'Host: hello.localhost' http://127.0.0.1:7777/)",
                         "request_id": request_id,
                     },
                     status_code=400,

@@ -285,7 +285,7 @@ class DevhostCLI:
 
         # Check router
         if self.router._check_health():
-            msg_success("Router: responding on :5555")
+            msg_success("Router: responding on :7777")
         else:
             msg_error("Router: not responding")
             msg_info("Start with: devhost start")

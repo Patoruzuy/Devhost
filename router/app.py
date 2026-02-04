@@ -583,7 +583,10 @@ async def wildcard_proxy(request: Request, full_path: str):
             if attempt < RETRY_ATTEMPTS - 1:
                 logger.debug(
                     "[%s] Connection refused (attempt %d/%d), retrying in %dms...",
-                    request_id, attempt + 1, RETRY_ATTEMPTS, RETRY_DELAY_MS
+                    request_id,
+                    attempt + 1,
+                    RETRY_ATTEMPTS,
+                    RETRY_DELAY_MS,
                 )
                 await asyncio.sleep(RETRY_DELAY_MS / 1000.0)
             continue
@@ -592,14 +595,17 @@ async def wildcard_proxy(request: Request, full_path: str):
             logger.warning(
                 "[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc
             )
-            return error_response(
-                request, 502, f"Upstream server unavailable: {type(exc).__name__}", request_id
-            )
+            return error_response(request, 502, f"Upstream server unavailable: {type(exc).__name__}", request_id)
     else:
         # All retries exhausted
         logger.warning(
             "[%s] Upstream connection failed after %d attempts for %s.%s -> %s: %s",
-            request_id, RETRY_ATTEMPTS, subdomain, base_domain, url, last_error
+            request_id,
+            RETRY_ATTEMPTS,
+            subdomain,
+            base_domain,
+            url,
+            last_error,
         )
         return error_response(
             request, 502, f"Upstream server not responding (tried {RETRY_ATTEMPTS} times)", request_id

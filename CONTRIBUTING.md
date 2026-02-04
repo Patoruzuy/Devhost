@@ -104,13 +104,21 @@ python -m venv venv
 source venv/bin/activate  # or venv\Scripts\activate on Windows
 ```
 
-3. **Install development dependencies:**
+3. **Upgrade packaging tools (recommended):**
+pip 
+Some Python/venv installs (notably Python 3.12+) create environments with `pip` but without `setuptools`/`wheel`. If you ever see errors like `BackendUnavailable: Cannot import 'setuptools.build_meta'`, run this step.
+
+```bash
+python -m pip install --upgrade pip setuptools wheel
+```
+
+4. **Install development dependencies:**
 
 ```bash
 pip install -e .[dev,tui,qr,tunnel]
 ```
 
-4. **Create a feature branch:**
+5. **Create a feature branch:**
 
 ```bash
 git checkout -b feature/your-feature-name

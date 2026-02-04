@@ -9,7 +9,7 @@ User={{USER}}
 # Working directory where the router lives
 WorkingDirectory=/home/{{USER}}/devhost/router
 # Path to the uvicorn or python binary inside the project's venv. Replace {{VENV_BIN}}.
-ExecStart={{VENV_BIN}} uvicorn app:app --host 127.0.0.1 --port 5555
+ExecStart={{VENV_BIN}} uvicorn app:app --host 127.0.0.1 --port 7777
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1

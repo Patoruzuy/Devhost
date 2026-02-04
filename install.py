@@ -392,7 +392,7 @@ def macos_install(domain: str, args) -> int:
     run(["launchctl", "unload", str(dest)], check=False)
     run(["launchctl", "load", "-w", str(dest)], check=False)
 
-    msg_ok("Setup complete. Check router health with: curl http://127.0.0.1:5555/health")
+    msg_ok("Setup complete. Check router health with: curl http://127.0.0.1:7777/health")
     msg_info("Logs: tail -f /tmp/devhost-router.log /tmp/devhost-router.err")
     return 0
 

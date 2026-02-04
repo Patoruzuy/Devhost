@@ -132,7 +132,12 @@ class DevhostDashboard(App):
 
         # Update status grid
         grid = self.query_one(StatusGrid)
-        grid.update_routes(self.state.routes, self.state.proxy_mode, self.state.system_domain)
+        grid.update_routes(
+            self.state.routes,
+            self.state.proxy_mode,
+            self.state.system_domain,
+            self.state.gateway_port,
+        )
 
         # Update sidebar
         sidebar = self.query_one(Sidebar)
@@ -180,6 +185,14 @@ class DevhostDashboard(App):
         """Delete selected route."""
         if self.selected_route:
             self.state.remove_route(self.selected_route)
+            if self.state.proxy_mode == "system":
+                from devhost_cli.caddy_lifecycle import write_system_caddyfile
+
+                write_system_caddyfile(self.state)
+            elif self.state.proxy_mode == "external":
+                from devhost_cli.proxy import export_snippets
+
+                export_snippets(self.state, [self.state.external_driver])
             self.notify(f"Removed route: {self.selected_route}", severity="information")
             self.selected_route = None
             self.refresh_data()

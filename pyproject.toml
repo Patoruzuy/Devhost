@@ -103,5 +103,5 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["devhost_cli*"]
+include = ["devhost_cli*", "devhost_tui*"]
 exclude = ["tests*", "caddy*", "router*", "completions*"]

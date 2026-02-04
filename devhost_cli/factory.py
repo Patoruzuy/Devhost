@@ -25,7 +25,7 @@ def create_devhost_app() -> FastAPI:
         import uvicorn
 
         app = create_devhost_app()
-        uvicorn.run(app, host="127.0.0.1", port=5555)
+        uvicorn.run(app, host="127.0.0.1", port=7777)
     """
     return create_app()
 

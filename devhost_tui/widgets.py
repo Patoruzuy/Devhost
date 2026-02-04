@@ -85,6 +85,7 @@ class StatusGrid(Static):
         self._routes: dict = {}
         self._mode: str = "gateway"
         self._domain: str = "localhost"
+        self._gateway_port: int = 7777
 
     def compose(self) -> ComposeResult:
         yield Label("[b]Routes[/b]", classes="section-title")
@@ -104,11 +105,12 @@ class StatusGrid(Static):
         table.add_column("Upstream", key="upstream", width=20)
         table.add_column("Integrity", key="integrity", width=10)
 
-    def update_routes(self, routes: dict, mode: str, domain: str) -> None:
+    def update_routes(self, routes: dict, mode: str, domain: str, gateway_port: int) -> None:
         """Update the routes table."""
         self._routes = routes
         self._mode = mode
         self._domain = domain
+        self._gateway_port = gateway_port
 
         table = self.query_one(DataTable)
         table.clear()
@@ -120,7 +122,7 @@ class StatusGrid(Static):
 
             # Build URL based on mode
             if mode == "gateway":
-                url = f"http://{name}.{route_domain}:7777"
+                url = f"http://{name}.{route_domain}:{gateway_port}"
             elif mode == "system":
                 url = f"http://{name}.{route_domain}"
             else:
@@ -158,7 +160,7 @@ class FlowDiagram(Static):
     def compose(self) -> ComposeResult:
         yield Markdown("", id="flow-content")
 
-    def show_flow(self, name: str, route: dict, mode: str, domain: str) -> None:
+    def show_flow(self, name: str, route: dict, mode: str, domain: str, gateway_port: int) -> None:
         """Display traffic flow for a route."""
         self._route_name = name
         self._route = route
@@ -181,9 +183,9 @@ Mode: Awareness (off)
         elif mode == "gateway":
             diagram = f"""
 ```
-Mode: Gateway (port 7777)
+Mode: Gateway (port {gateway_port})
 
-[Browser] ──(7777)──> [Devhost Gateway] ──({upstream})──> [App: {name}]
+[Browser] ──({gateway_port})──> [Devhost Gateway] ──({upstream})──> [App: {name}]
     │                       │                      │
     Host: {host}      Route lookup           Upstream
 ```
@@ -277,7 +279,7 @@ class DetailsPane(Static):
 
         # Update flow diagram
         flow = self.query_one(FlowDiagram)
-        flow.show_flow(name, route, state.proxy_mode, state.system_domain)
+        flow.show_flow(name, route, state.proxy_mode, state.system_domain, state.gateway_port)
 
         # Update verify tab
         verify = self.query_one("#verify-content", Static)

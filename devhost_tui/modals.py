@@ -12,6 +12,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
 
 from devhost_cli.state import StateConfig
+from devhost_cli.validation import parse_target, validate_name
 
 from .scanner import ListeningPort, detect_framework, scan_listening_ports
 
@@ -200,10 +201,16 @@ class AddRouteWizard(ModalScreen[bool]):
         content = self.query_one("#wizard-content")
         content.remove_children()
 
+        state = StateConfig()
+
         content.mount(Label("Select routing mode:", classes="field-label"))
         content.mount(
             RadioSet(
-                RadioButton("Gateway (recommended) - Routes through port 7777", id="mode-gateway", value=True),
+                RadioButton(
+                    f"Gateway (recommended) - Routes through port {state.gateway_port}",
+                    id="mode-gateway",
+                    value=True,
+                ),
                 RadioButton("System - Portless URLs on port 80/443 (requires install)", id="mode-system"),
                 RadioButton("External - Integrate with existing proxy", id="mode-external"),
                 id="mode-select",
@@ -236,8 +243,17 @@ Domain:      {state.system_domain}
 
 [b]This will:[/b]
   • Write to: ~/.devhost/state.yml
-  • Generate: ~/.devhost/proxy/caddy/devhost.caddy
-  • Enable integrity hashing
+"""
+        if self.route_mode == "system":
+            from devhost_cli.caddy_lifecycle import get_caddyfile_path
+
+            review += f"  • Generate: {get_caddyfile_path(state)}\n"
+        elif self.route_mode == "external":
+            review += f"  • Generate: {state.snippet_path}\n"
+        else:
+            review += "  • No proxy snippet needed (gateway mode)\n"
+
+        review += """  • Enable integrity hashing
 
 [b]URL:[/b]
 """
@@ -275,11 +291,21 @@ Domain:      {state.system_domain}
             if not self.route_name:
                 self.app.notify("Route name is required", severity="error")
                 return
+            if not validate_name(self.route_name):
+                self.app.notify("Invalid route name. Use letters, numbers, and hyphens.", severity="error")
+                return
             if not self.route_upstream:
                 self.app.notify("Upstream target is required", severity="error")
                 return
 
-            # Normalize upstream
+            if not parse_target(self.route_upstream):
+                self.app.notify(
+                    "Invalid upstream target. Use <port>, <host>:<port>, or http(s)://<host>:<port>.",
+                    severity="error",
+                )
+                return
+
+            # Normalize upstream for portability
             if self.route_upstream.isdigit():
                 self.route_upstream = f"127.0.0.1:{self.route_upstream}"
 
@@ -318,10 +344,18 @@ Domain:      {state.system_domain}
             enabled=True,
         )
 
-        # Export proxy snippet
-        from devhost_cli.proxy import export_snippets
+        # Apply selected routing mode and update proxy config
+        state.proxy_mode = self.route_mode
 
-        export_snippets(state, ["caddy"])
+        if self.route_mode == "system":
+            from devhost_cli.caddy_lifecycle import write_system_caddyfile
+
+            write_system_caddyfile(state)
+        elif self.route_mode == "external":
+            from devhost_cli.proxy import export_snippets
+
+            state.set_external_config(state.external_driver)
+            export_snippets(state, [state.external_driver])
 
         self.app.notify(f"Route '{self.route_name}' added", severity="information")
         self.app.refresh_data()
