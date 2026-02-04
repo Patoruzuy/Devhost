@@ -17,6 +17,7 @@ def _config_candidates() -> list[Path]:
     env_path = os.getenv("DEVHOST_CONFIG")
     if env_path:
         candidates.append(Path(env_path))
+    candidates.append(Path.home() / ".devhost" / "devhost.json")
     candidates.append(Path.cwd() / "devhost.json")
     here = Path(__file__).resolve()
     # repo root (../../../devhost.json) and legacy router-local file

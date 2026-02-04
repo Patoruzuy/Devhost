@@ -285,7 +285,7 @@ def sync_env_file(name: str | None = None, env_file: str = ".env", dry_run: bool
     scheme = get_dev_scheme(routes[name])
 
     if mode == "gateway":
-        url = f"{scheme}://{name}.{domain}:{port}"
+        url = f"http://{name}.{domain}:{port}"
     else:
         url = f"{scheme}://{name}.{domain}"
 
@@ -390,7 +390,7 @@ def show_oauth_for_route(name: str | None = None):
 
     if mode == "gateway":
         port = state.gateway_port
-        print_oauth_uris(name, domain, port, scheme=scheme)
+        print_oauth_uris(name, domain, port, scheme="http")
     else:
         print_oauth_uris(name, domain, scheme=scheme)
 

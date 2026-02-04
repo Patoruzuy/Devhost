@@ -3,19 +3,29 @@ FastAPI application core with proxy endpoints.
 """
 
 import asyncio
+import inspect
 import logging
 import os
 import time
 import uuid
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 
 from devhost_cli import __version__
 from devhost_cli.router.cache import RouteCache
 from devhost_cli.router.metrics import Metrics
 from devhost_cli.router.utils import extract_subdomain, load_domain, parse_target
+
+# Optional WebSocket client support (for WebSocket proxying)
+try:
+    import websockets
+    from websockets.exceptions import ConnectionClosed
+
+    WEBSOCKETS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    WEBSOCKETS_AVAILABLE = False
 
 # Configure logging
 LOG_LEVEL = os.getenv("DEVHOST_LOG_LEVEL", "INFO").upper()
@@ -34,6 +44,31 @@ logging.basicConfig(
     force=True,
 )
 logger = logging.getLogger("devhost.router")
+
+
+_WS_HEADERS_PARAM: str | None = None
+
+
+def _ws_connect(url: str, extra_headers: list[tuple[str, str]] | None, subprotocols: list[str] | None):
+    """Create a websockets client connection with version-compatible kwargs."""
+    kwargs: dict = {}
+    if subprotocols:
+        kwargs["subprotocols"] = subprotocols
+
+    if extra_headers:
+        global _WS_HEADERS_PARAM
+        if _WS_HEADERS_PARAM is None:
+            params = set(inspect.signature(websockets.connect).parameters)  # type: ignore[name-defined]
+            if "extra_headers" in params:
+                _WS_HEADERS_PARAM = "extra_headers"
+            elif "additional_headers" in params:
+                _WS_HEADERS_PARAM = "additional_headers"
+            else:  # Unknown signature; omit headers rather than crashing.
+                _WS_HEADERS_PARAM = ""
+        if _WS_HEADERS_PARAM:
+            kwargs[_WS_HEADERS_PARAM] = extra_headers
+
+    return websockets.connect(url, **kwargs)  # type: ignore[name-defined]
 
 
 def create_app() -> FastAPI:
@@ -143,6 +178,110 @@ def create_app() -> FastAPI:
                 healthy = bool(status is True)
                 results[names[idx]]["healthy"] = healthy
         return JSONResponse({"domain": load_domain(), "mappings": results})
+
+    @app.websocket("/{full_path:path}")
+    async def websocket_proxy(websocket: WebSocket, full_path: str):
+        """Proxy WebSocket connections to upstream servers."""
+        if not WEBSOCKETS_AVAILABLE:
+            await websocket.close(code=1011, reason="WebSocket proxying not available")
+            return
+
+        routes = await route_cache.get_routes()
+
+        host_header = websocket.headers.get("host", "")
+        base_domain = load_domain()
+        subdomain = extract_subdomain(host_header, base_domain)
+
+        if not subdomain:
+            await websocket.close(code=1008, reason="Missing or invalid Host header")
+            return
+
+        target_value = routes.get(subdomain)
+        target = parse_target(target_value)
+        if not target:
+            await websocket.close(code=1008, reason=f"No route found for {subdomain}.{base_domain}")
+            return
+
+        target_scheme, target_host, target_port = target
+        ws_scheme = "wss" if target_scheme == "https" else "ws"
+        upstream_url = f"{ws_scheme}://{target_host}:{target_port}/{full_path}"
+        if websocket.url.query:
+            upstream_url = f"{upstream_url}?{websocket.url.query}"
+
+        request_id = str(uuid.uuid4())[:8]
+        logger.info("[%s] WebSocket connection: %s.%s -> %s", request_id, subdomain, base_domain, upstream_url)
+
+        await websocket.accept()
+
+        try:
+            skip_headers = {
+                "host",
+                "connection",
+                "upgrade",
+                "sec-websocket-key",
+                "sec-websocket-version",
+                "sec-websocket-extensions",
+                "sec-websocket-protocol",
+            }
+            extra_headers: list[tuple[str, str]] = []
+            for name_bytes, value_bytes in websocket.headers.raw:
+                name = name_bytes.decode("latin-1")
+                lname = name.lower()
+                if lname in skip_headers:
+                    continue
+                extra_headers.append((name, value_bytes.decode("latin-1")))
+
+            protocol_header = websocket.headers.get("sec-websocket-protocol")
+            subprotocols = None
+            if protocol_header:
+                subprotocols = [p.strip() for p in protocol_header.split(",") if p.strip()]
+
+            async with _ws_connect(upstream_url, extra_headers, subprotocols) as upstream_ws:
+
+                async def client_to_upstream():
+                    try:
+                        while True:
+                            data = await websocket.receive()
+                            if data.get("type") == "websocket.disconnect":
+                                break
+                            if "text" in data:
+                                await upstream_ws.send(data["text"])
+                            elif "bytes" in data:
+                                await upstream_ws.send(data["bytes"])
+                    except WebSocketDisconnect:
+                        pass
+
+                async def upstream_to_client():
+                    try:
+                        async for message in upstream_ws:
+                            if isinstance(message, str):
+                                await websocket.send_text(message)
+                            else:
+                                await websocket.send_bytes(message)
+                    except ConnectionClosed:
+                        pass
+
+                done, pending = await asyncio.wait(
+                    [
+                        asyncio.create_task(client_to_upstream()),
+                        asyncio.create_task(upstream_to_client()),
+                    ],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                for task in pending:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+        except Exception as exc:
+            logger.warning("[%s] WebSocket proxy error: %s", request_id, exc)
+            try:
+                await websocket.close(code=1011, reason="Upstream connection failed")
+            except Exception:
+                pass
 
     @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
     async def wildcard_proxy(request: Request, full_path: str):

@@ -131,6 +131,7 @@ def start_tunnel(
     Returns:
         True if tunnel started successfully
     """
+
     def _load_routes_from_config() -> dict[str, dict]:
         config = Config()
         data = config.load()
@@ -251,9 +252,9 @@ def start_tunnel(
         return False
 
 
-def _start_cloudflared(exe: str, port: int, route_name: str) -> subprocess.Popen | None:
+def _start_cloudflared(exe: str, target_url: str, route_name: str) -> subprocess.Popen | None:
     """Start a cloudflared tunnel."""
-    cmd = [exe, "tunnel", "--url", f"http://127.0.0.1:{port}"]
+    cmd = [exe, "tunnel", "--url", target_url]
 
     # Create log file for output
     log_dir = Path.home() / ".devhost" / "logs"
@@ -275,9 +276,15 @@ def _start_cloudflared(exe: str, port: int, route_name: str) -> subprocess.Popen
         return None
 
 
-def _start_ngrok(exe: str, port: int, route_name: str) -> subprocess.Popen | None:
+def _start_ngrok(exe: str, port: int, target_url: str, route_name: str) -> subprocess.Popen | None:
     """Start an ngrok tunnel."""
-    cmd = [exe, "http", str(port), "--log=stdout", "--log-format=json"]
+    # ngrok accepts either a port or a full URL; use URL when scheme/host isn't default
+    cmd_target = (
+        str(port)
+        if target_url.startswith("http://127.0.0.1:") or target_url.startswith("http://localhost:")
+        else target_url
+    )
+    cmd = [exe, "http", cmd_target, "--log=stdout", "--log-format=json"]
 
     # Create log file for output
     log_dir = Path.home() / ".devhost" / "logs"
@@ -299,9 +306,19 @@ def _start_ngrok(exe: str, port: int, route_name: str) -> subprocess.Popen | Non
         return None
 
 
-def _start_localtunnel(exe: str, port: int, route_name: str) -> subprocess.Popen | None:
+def _start_localtunnel(
+    exe: str,
+    port: int,
+    host: str,
+    scheme: str,
+    route_name: str,
+) -> subprocess.Popen | None:
     """Start a localtunnel."""
     cmd = [exe, "--port", str(port)]
+    if host not in ("127.0.0.1", "localhost"):
+        cmd.extend(["--local-host", host])
+    if scheme == "https":
+        cmd.append("--local-https")
 
     # Create log file for output
     log_dir = Path.home() / ".devhost" / "logs"

@@ -5,7 +5,6 @@ import platform
 import socket
 import sys
 import webbrowser
-from pathlib import Path
 
 from .caddy import edit_config, generate_caddyfile, print_caddyfile
 from .config import Config
@@ -68,6 +67,28 @@ class DevhostCLI:
         self.config = Config()
         self.router = Router()
 
+    def _access_url(self, name: str, domain: str, target: object | None = None) -> str:
+        """Build the user-facing access URL based on current proxy mode."""
+        try:
+            state = StateConfig()
+            mode = state.proxy_mode
+            gateway_port = state.gateway_port
+        except Exception:
+            mode = "gateway"
+            gateway_port = 7777
+
+        if mode == "gateway":
+            return f"http://{name}.{domain}:{gateway_port}"
+        if mode in ("system", "external"):
+            scheme = get_dev_scheme(target)
+            return f"{scheme}://{name}.{domain}"
+        if target is not None:
+            parsed = parse_target(str(target))
+            if parsed:
+                upstream_scheme, host, port = parsed
+                return f"{upstream_scheme}://{host}:{port}"
+        return f"http://{name}.{domain}:{gateway_port}"
+
     def add(self, name: str, target: str, scheme: str | None = None):
         """Add a new mapping"""
         msg_step(1, 4, "Validating inputs...")
@@ -118,6 +139,16 @@ class DevhostCLI:
         domain = self.config.get_domain()
         msg_success(f"Added mapping: {name}.{domain} -> {target_scheme}://{host}:{port}")
 
+        # Keep v3 state routes in sync (Mode 2/3 tooling relies on this)
+        try:
+            state = StateConfig()
+            upstream = f"{host}:{port}"
+            if target_scheme == "https":
+                upstream = f"https://{upstream}"
+            state.set_route(name, upstream=upstream, domain=domain, enabled=True)
+        except Exception:
+            pass
+
         msg_step(3, 4, "Checking if service is reachable...")
         if check_port_open(host, port):
             msg_success(f"Service is running on {host}:{port}")
@@ -133,7 +164,7 @@ class DevhostCLI:
             msg_success("Router is running")
 
         print()
-        msg_info(f"Access your app at: {target_scheme}://{name}.{domain}")
+        msg_info(f"Access your app at: {self._access_url(name, domain, routes.get(name))}")
         return True
 
     def remove(self, name: str):
@@ -148,6 +179,11 @@ class DevhostCLI:
         del routes[name]
         self.config.save(routes)
         generate_caddyfile(routes)
+
+        try:
+            StateConfig().remove_route(name)
+        except Exception:
+            pass
 
         if IS_WINDOWS:
             domain = self.config.get_domain()
@@ -177,20 +213,23 @@ class DevhostCLI:
         for name, target in routes.items():
             parsed = parse_target(str(target))
             if parsed:
-                scheme, host, port = parsed
+                upstream_scheme, host, port = parsed
                 # Check if service is running
                 is_running = check_port_open(host, port, timeout=0.5)
+                upstream = f"{host}:{port}"
+                if upstream_scheme == "https":
+                    upstream = f"https://{upstream}"
                 rich_routes[name] = {
-                    "upstream": f"{host}:{port}",
+                    "upstream": upstream,
                     "domain": domain,
-                    "scheme": scheme,
+                    "scheme": "http",
                     "enabled": is_running,
                 }
             else:
                 rich_routes[name] = {
                     "upstream": str(target),
                     "domain": domain,
-                    "scheme": get_dev_scheme(target),
+                    "scheme": "http",
                     "enabled": False,
                 }
 
@@ -224,8 +263,7 @@ class DevhostCLI:
             return False
 
         target = routes[name]
-        scheme = get_dev_scheme(target)
-        url = f"{scheme}://{name}.{domain}"
+        url = self._access_url(name, domain, target)
         print(url)
         if sys.stdin.isatty():
             print("Press Ctrl+O to open in browser, any other key to skip...", end=" ", flush=True)
@@ -259,7 +297,7 @@ class DevhostCLI:
             return False
 
         scheme, host, port = parsed
-        url = f"{scheme}://{name}.{domain}"
+        url = self._access_url(name, domain, target)
 
         msg_info(f"Opening {url}...")
         if webbrowser.open(url):
@@ -273,7 +311,7 @@ class DevhostCLI:
         print(f"\n{Colors.BLUE}Devhost Validation{Colors.RESET}\n")
 
         # Check config file
-        config_file = Path(__file__).parent.parent.resolve() / "devhost.json"
+        config_file = self.config.config_file
         if config_file.exists():
             try:
                 self.config.load()
@@ -284,8 +322,14 @@ class DevhostCLI:
             msg_warning("Config file not found (will be created)")
 
         # Check router
+        gateway_port = 7777
+        try:
+            gateway_port = StateConfig().gateway_port
+        except Exception:
+            pass
+
         if self.router._check_health():
-            msg_success("Router: responding on :7777")
+            msg_success(f"Router: responding on :{gateway_port}")
         else:
             msg_error("Router: not responding")
             msg_info("Start with: devhost start")
@@ -422,7 +466,7 @@ class DevhostCLI:
         console.print()
 
         # Config file check
-        config_file = Path(__file__).parent.parent.resolve() / "devhost.json"
+        config_file = self.config.config_file
         if config_file.exists():
             try:
                 self.config.load()

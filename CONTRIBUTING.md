@@ -44,7 +44,7 @@ Before submitting, verify your changes work as expected:
 
 ```bash
 # Install in editable mode
-pip install -e .[dev,tui]
+python -m pip install -e ".[dev,all]"
 
 # Start the router
 make start
@@ -105,8 +105,7 @@ source venv/bin/activate  # or venv\Scripts\activate on Windows
 ```
 
 3. **Upgrade packaging tools (recommended):**
-pip 
-Some Python/venv installs (notably Python 3.12+) create environments with `pip` but without `setuptools`/`wheel`. If you ever see errors like `BackendUnavailable: Cannot import 'setuptools.build_meta'`, run this step.
+Some Python/venv installs (notably Python 3.12+) create environments with `pip` but without `setuptools`/`wheel`. If you ever see errors like `BackendUnavailable: Cannot import 'setuptools.build_meta'`, run:
 
 ```bash
 python -m pip install --upgrade pip setuptools wheel
@@ -115,7 +114,7 @@ python -m pip install --upgrade pip setuptools wheel
 4. **Install development dependencies:**
 
 ```bash
-pip install -e .[dev,tui,qr,tunnel]
+python -m pip install -e ".[dev,all]"
 ```
 
 5. **Create a feature branch:**
@@ -145,6 +144,15 @@ git push origin feature/your-feature-name
    - Reference to related issues (if any)
    - Screenshots/examples for UI changes
    - Confirmation that linting and tests pass
+
+### Copilot Code Review (Optional)
+
+If GitHub Copilot code review is enabled for your repository/org, you can request it on a pull request the same way you request a human reviewer:
+
+- Open a PR
+- Add **Copilot** as a reviewer (or use the PR UI action that requests a Copilot review, if present)
+
+Availability and UI labels vary by GitHub plan and org settings.
 
 3. **Respond to feedback** from maintainers
 

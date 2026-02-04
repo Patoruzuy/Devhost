@@ -133,6 +133,7 @@ def load_domain() -> str:
     here = Path(__file__).resolve()
     candidates = [
         Path.cwd() / ".devhost" / "domain",
+        Path.home() / ".devhost" / "domain",
         here.parent.parent / ".devhost" / "domain",
         here.parent / ".devhost" / "domain",
     ]
@@ -169,6 +170,7 @@ def _config_candidates() -> list[Path]:
     env_path = os.getenv("DEVHOST_CONFIG")
     if env_path:
         candidates.append(Path(env_path))
+    candidates.append(Path.home() / ".devhost" / "devhost.json")
     candidates.append(Path.cwd() / "devhost.json")
     here = Path(__file__).resolve()
     # repo root (../devhost.json) and legacy router-local file
@@ -459,12 +461,41 @@ async def websocket_proxy(websocket: WebSocket, full_path: str):
     await websocket.accept()
 
     try:
-        async with websockets.connect(upstream_url) as upstream_ws:
+        # Forward client headers and subprotocols to upstream where applicable
+        skip_headers = {
+            "host",
+            "connection",
+            "upgrade",
+            "sec-websocket-key",
+            "sec-websocket-version",
+            "sec-websocket-extensions",
+            "sec-websocket-protocol",
+        }
+        extra_headers = []
+        for name_bytes, value_bytes in websocket.headers.raw:
+            name = name_bytes.decode("latin-1")
+            lname = name.lower()
+            if lname in skip_headers:
+                continue
+            extra_headers.append((name, value_bytes.decode("latin-1")))
+
+        protocol_header = websocket.headers.get("sec-websocket-protocol")
+        subprotocols = None
+        if protocol_header:
+            subprotocols = [p.strip() for p in protocol_header.split(",") if p.strip()]
+
+        async with websockets.connect(
+            upstream_url,
+            extra_headers=extra_headers,
+            subprotocols=subprotocols,
+        ) as upstream_ws:
             # Create tasks for bidirectional communication
             async def client_to_upstream():
                 try:
                     while True:
                         data = await websocket.receive()
+                        if data.get("type") == "websocket.disconnect":
+                            break
                         if "text" in data:
                             await upstream_ws.send(data["text"])
                         elif "bytes" in data:
@@ -549,7 +580,8 @@ async def wildcard_proxy(request: Request, full_path: str):
     client_ip = request.client.host if request.client else "127.0.0.1"
     headers["X-Forwarded-For"] = headers.get("x-forwarded-for", client_ip)
     headers["X-Forwarded-Host"] = original_host
-    headers["X-Forwarded-Proto"] = request.url.scheme or "http"
+    if "x-forwarded-proto" not in headers:
+        headers["X-Forwarded-Proto"] = request.url.scheme or "http"
     headers["X-Real-IP"] = client_ip
 
     # Use globally shared client

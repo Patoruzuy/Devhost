@@ -110,8 +110,11 @@ def print_caddyfile(routes: dict[str, Any] | None = None) -> None:
 
 def edit_config() -> None:
     """Open devhost.json in text editor"""
-    script_dir = Path(__file__).parent.parent.resolve()
-    config_file = script_dir / "devhost.json"
+    config = Config()
+    config_file = config.config_file
+    if not config_file.exists():
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text("{}", encoding="utf-8")
 
     editor = os.environ.get("EDITOR")
     if not editor:

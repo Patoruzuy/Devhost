@@ -139,17 +139,51 @@ class Config:
     """Manages devhost.json configuration"""
 
     def __init__(self):
-        # Check environment variable first
         env_path = os.getenv("DEVHOST_CONFIG")
         if env_path:
-            self.config_file = Path(env_path).resolve()
+            self.config_file = Path(env_path).expanduser().resolve()
             self.script_dir = self.config_file.parent
+            self.domain_file = self.script_dir / ".devhost" / "domain"
         else:
-            # Use parent directory of this module
-            self.script_dir = Path(__file__).parent.parent.resolve()
+            # Default to user-owned config so pip installs work without writing into site-packages.
+            self.script_dir = Path.home() / ".devhost"
             self.config_file = self.script_dir / "devhost.json"
+            self.domain_file = self.script_dir / "domain"
+            self._migrate_legacy_user_files()
 
-        self.domain_file = self.script_dir / ".devhost" / "domain"
+    def _migrate_legacy_user_files(self) -> None:
+        """
+        Best-effort migration from legacy repo/site-packages locations into ~/.devhost.
+
+        This avoids breaking upgrades where older versions wrote devhost.json or
+        .devhost/domain under the package directory.
+        """
+        try:
+            if self.config_file.exists() and self.domain_file.exists():
+                return
+        except OSError:
+            return
+
+        legacy_root = Path(__file__).parent.parent.resolve()
+        legacy_config = legacy_root / "devhost.json"
+        legacy_domain = legacy_root / ".devhost" / "domain"
+
+        try:
+            self.script_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+
+        try:
+            if (not self.config_file.exists()) and legacy_config.is_file():
+                self.config_file.write_text(legacy_config.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
+
+        try:
+            if (not self.domain_file.exists()) and legacy_domain.is_file():
+                self.domain_file.write_text(legacy_domain.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
 
     def load(self) -> dict:
         """Load configuration from file"""
@@ -187,7 +221,7 @@ class Config:
         if domain:
             return domain
 
-        # Check domain file
+        # Check legacy domain file first (supports per-workspace configs via DEVHOST_CONFIG)
         if self.domain_file.exists():
             try:
                 domain = self.domain_file.read_text().strip()
@@ -195,6 +229,16 @@ class Config:
                     return domain
             except OSError:
                 pass
+
+        # Prefer unified v3 state as fallback
+        try:
+            from .state import StateConfig
+
+            domain = StateConfig().system_domain
+            if domain:
+                return domain
+        except Exception:
+            pass
 
         return "localhost"
 
@@ -213,6 +257,15 @@ class Config:
             self.domain_file.parent.mkdir(parents=True, exist_ok=True)
             self.domain_file.write_text(domain)
             msg_success(f"Domain set to: {domain}")
+
+            # Keep v3 state in sync (mode/system/external tooling relies on it)
+            try:
+                from .state import StateConfig
+
+                state = StateConfig()
+                state.system_domain = domain
+            except Exception:
+                pass
 
             # Regenerate Caddyfile with new domain
             from .caddy import generate_caddyfile

@@ -15,6 +15,7 @@ def load_domain() -> str:
     here = Path(__file__).resolve()
     candidates = [
         Path.cwd() / ".devhost" / "domain",
+        Path.home() / ".devhost" / "domain",
         here.parent.parent.parent / ".devhost" / "domain",
         here.parent.parent / ".devhost" / "domain",
     ]

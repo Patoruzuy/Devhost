@@ -3,9 +3,11 @@
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
+from .config import Config
 from .platform import IS_WINDOWS, find_python
 from .utils import msg_error, msg_info, msg_step, msg_success, msg_warning
 
@@ -34,6 +36,14 @@ class Router:
             self.log_file = Path("/tmp/devhost-router.log")
             self.err_file = Path("/tmp/devhost-router.err.log")
 
+    def _gateway_port(self) -> int:
+        try:
+            from .state import StateConfig
+
+            return StateConfig().gateway_port
+        except Exception:
+            return 7777
+
     def is_running(self) -> tuple[bool, int | None]:
         """Check if router is running, return (is_running, pid)"""
         if not self.pid_file.exists():
@@ -61,7 +71,8 @@ class Router:
         try:
             import urllib.request
 
-            req = urllib.request.Request("http://127.0.0.1:7777/health")
+            port = self._gateway_port()
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/health")
             with urllib.request.urlopen(req, timeout=2) as response:
                 return response.status == 200
         except Exception:
@@ -69,24 +80,6 @@ class Router:
 
     def start(self) -> bool:
         """Start the router process"""
-        # Check if installed via pip (no router directory)
-        if is_pip_installed():
-            msg_warning("Router not available when installed via pip.")
-            msg_info("")
-            msg_info("With pip install, the router is not needed!")
-            msg_info("Caddy proxies directly to your app.")
-            msg_info("")
-            msg_info("Usage:")
-            msg_info("  1. Add your route:    devhost add myapp 8000")
-            msg_info("  2. Start Caddy:       devhost caddy start")
-            msg_info("  3. Run your app on port 8000")
-            msg_info("  4. Access at:         http://myapp.localhost")
-            msg_info("")
-            msg_info("Or use the zero-config runner:")
-            msg_info("  from devhost_cli.frameworks import run_flask")
-            msg_info("  run_flask(app, name='myapp')")
-            return False
-
         msg_step(1, 3, "Checking if router is already running...")
         running, pid = self.is_running()
         if running:
@@ -94,12 +87,17 @@ class Router:
             return True
 
         if IS_WINDOWS:
-            from .windows import caddy_start
+            try:
+                from .state import StateConfig
+                from .windows import caddy_start
 
-            caddy_start()
+                if StateConfig().proxy_mode == "system":
+                    caddy_start()
+            except Exception:
+                pass
 
         msg_step(2, 3, "Finding Python interpreter...")
-        python = find_python()
+        python = sys.executable or find_python()
         if not python:
             msg_error("Python not found. Please install Python 3.10+")
             return False
@@ -116,14 +114,6 @@ class Router:
                             msg_error("Venv appears to be created by WSL. Recreate with Python installer.")
                             return False
 
-        # Check if uvicorn is installed
-        result = subprocess.run([str(python), "-c", "import uvicorn"], capture_output=True)
-        if result.returncode != 0:
-            msg_warning("uvicorn not found in venv, installing dependencies...")
-            req_file = self.router_dir / "requirements.txt"
-            if req_file.exists():
-                subprocess.run([str(python), "-m", "pip", "install", "-q", "-r", str(req_file)])
-
         msg_step(3, 3, "Starting router...")
 
         # Ensure directories exist
@@ -131,17 +121,23 @@ class Router:
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         self.err_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Start router process
-        cmd = [
-            str(python),
-            "-m",
-            "uvicorn",
-            "app:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "7777",
-        ]
+        port = self._gateway_port()
+        cfg = Config()
+        env = os.environ.copy()
+        env.setdefault("DEVHOST_CONFIG", str(cfg.config_file))
+        env.setdefault("DEVHOST_DOMAIN", cfg.get_domain())
+
+        # Prefer the in-repo router during development; fall back to packaged router when installed via pip.
+        use_repo_router = (self.router_dir / "app.py").exists()
+        cmd = [str(python), "-m", "uvicorn"]
+        if use_repo_router:
+            cmd.extend(["app:app"])
+            cwd = str(self.router_dir)
+        else:
+            cmd.extend(["--factory", "devhost_cli.router.core:create_app"])
+            cwd = str(self.script_dir)
+
+        cmd.extend(["--host", "127.0.0.1", "--port", str(port)])
 
         creationflags = 0
         if IS_WINDOWS and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
@@ -150,7 +146,8 @@ class Router:
         with open(self.log_file, "a", encoding="utf-8") as log, open(self.err_file, "a", encoding="utf-8") as err:
             process = subprocess.Popen(
                 cmd,
-                cwd=str(self.router_dir),
+                cwd=cwd,
+                env=env,
                 stdout=log,
                 stderr=err,
                 start_new_session=not IS_WINDOWS,

@@ -182,6 +182,26 @@ class StateConfig:
         """Get system proxy domain"""
         return self._state.get("proxy", {}).get("system", {}).get("domain", "localhost")
 
+    @system_domain.setter
+    def system_domain(self, value: str) -> None:
+        """Set system proxy domain"""
+        old_domain = self.system_domain
+        domain = (value or "").strip().lower()
+        if not domain:
+            raise ValueError("Domain cannot be empty")
+        if "/" in domain or domain.startswith("http"):
+            raise ValueError("Domain must be a hostname only (no scheme or path)")
+        self._state.setdefault("proxy", {}).setdefault("system", {})["domain"] = domain
+
+        # Keep route domains consistent when they were previously using the old global domain.
+        routes = self._state.get("routes", {})
+        if isinstance(routes, dict):
+            for route in routes.values():
+                if isinstance(route, dict) and route.get("domain") == old_domain:
+                    route["domain"] = domain
+
+        self._save()
+
     # ─────────────────────────────────────────────────────────────
     # Routes
     # ─────────────────────────────────────────────────────────────

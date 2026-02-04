@@ -175,6 +175,21 @@ def check_port_conflicts(ports: list[int] | None = None) -> list[dict]:
     return conflicts
 
 
+def _parse_listen_port(value: str, default_port: int) -> int:
+    if not value:
+        return default_port
+    if ":" in value:
+        _, port_str = value.rsplit(":", 1)
+        try:
+            return int(port_str)
+        except ValueError:
+            return default_port
+    try:
+        return int(value)
+    except ValueError:
+        return default_port
+
+
 def print_port_conflicts(conflicts: list[dict]) -> None:
     """Print port conflicts with best-next-action guidance."""
     if not conflicts:
@@ -362,8 +377,12 @@ def start_caddy(state: StateConfig, force: bool = False) -> tuple[bool, str]:
     if not caddy_exe:
         return (False, "Caddy not found. Install with: devhost install --caddy")
 
-    # Check port conflicts
-    conflicts = check_port_conflicts([80, 443])
+    # Check port conflicts for configured listen ports
+    listen_http = state.raw.get("proxy", {}).get("system", {}).get("listen_http", "127.0.0.1:80")
+    listen_https = state.raw.get("proxy", {}).get("system", {}).get("listen_https", "127.0.0.1:443")
+    http_port = _parse_listen_port(listen_http, 80)
+    https_port = _parse_listen_port(listen_https, 443)
+    conflicts = check_port_conflicts(sorted({http_port, https_port}))
     if conflicts:
         # Check if it's our Caddy
         stored_pid = state.raw.get("proxy", {}).get("system", {}).get("caddy_pid")

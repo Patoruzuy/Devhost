@@ -44,13 +44,13 @@ Devhost eliminates "port salad" by giving your local apps memorable subdomain UR
 
 - ❌ **Never surprise-edits user files**: Any edit to user-owned files (like existing Caddyfiles) must be explicit, backed up, and reversible
 - ❌ **No automatic LAN exposure**: Defaults to loopback (127.0.0.1) to prevent accidental network exposure
-- ❌ **No hidden state**: All configuration is in `~/.devhost/state.yml` and `devhost.json` — no mysterious database
-- ❌ **No process management beyond router/Caddy**: Won't start/stop your apps automatically (use `devhost run` explicitly)
+- ❌ **No hidden state**: All configuration is in `~/.devhost/state.yml` and `~/.devhost/devhost.json` — no mysterious database
+- ❌ **No app process management**: Devhost routes traffic; it doesn’t own your app lifecycle (use your normal `npm run dev`, `uvicorn`, etc., or the optional `devhost_cli.runner.run()` helper)
 - ❌ **No production deployment**: Strictly for local development — never use in production environments
 
 ### Clear Ownership Boundaries
 
-- **Devhost owns**: Router process, Caddy (in System mode), `~/.devhost/state.yml`, generated snippets
+- **Devhost owns**: Router process, Caddy (in System mode), `~/.devhost/state.yml`, `~/.devhost/devhost.json`, generated snippets
 - **You own**: Your apps, existing proxy configs, system DNS settings, hosts file entries
 - **Opt-in only**: Features like tunnel exposure, TUI dashboard, and External mode require explicit commands
 
@@ -71,12 +71,12 @@ No ambiguity. Each mode has a clear, concrete outcome.
 pip install devhost
 
 # With optional dependencies
-pip install devhost[flask]      # Flask integration
-pip install devhost[fastapi]    # FastAPI integration  
+pip install devhost[flask]      # Flask integration helpers
+pip install devhost[fastapi]    # FastAPI integration helpers
 pip install devhost[django]     # Django integration
 pip install devhost[tui]        # Interactive dashboard (optional, uninstall anytime)
 pip install devhost[qr]         # QR code generation
-pip install devhost[tunnel]     # Tunnel providers (cloudflared, ngrok, localtunnel)
+pip install devhost[dev]        # Tests + linting (contributors)
 
 # Install everything
 pip install devhost[all]
@@ -87,6 +87,9 @@ pip install devhost[all]
 ### Add Your First Route
 
 ```bash
+# Start the Gateway router (Mode 1)
+devhost start
+
 # Add a route
 devhost add api 8000
 
@@ -113,7 +116,16 @@ def index():
 if __name__ == '__main__':
     run(app, name="myapp")
     # → Accessible at http://myapp.localhost:7777
+    # (Auto-registers the route and starts the Gateway router if needed)
 ```
+
+## 📚 Documentation
+
+- Docs index: https://github.com/Patoruzuy/Devhost/blob/main/docs/README.md
+- CLI reference: https://github.com/Patoruzuy/Devhost/blob/main/docs/cli.md
+- Modes: https://github.com/Patoruzuy/Devhost/blob/main/docs/modes.md
+- Configuration: https://github.com/Patoruzuy/Devhost/blob/main/docs/configuration.md
+- Troubleshooting: https://github.com/Patoruzuy/Devhost/blob/main/docs/troubleshooting.md
 
 ## 🎯 Modes
 
@@ -165,7 +177,7 @@ devhost add admin 4200       # http://admin.localhost:7777
 
 4. **Real CORS Testing** — CORS doesn't trigger on same `localhost:PORT`. Different subdomains = catch CORS issues before production.
 
-[See all 10 benefits](BENEFITS.md#mode-1-gateway-default) including SameSite cookies, Service Workers, mobile testing, TLS/HTTPS matching, and more.
+[See all 10 benefits](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-1-gateway-default) including SameSite cookies, Service Workers, mobile testing, TLS/HTTPS matching, and more.
 
 ### Mode 2: System Proxy
 
@@ -186,15 +198,15 @@ devhost proxy upgrade --to system
 
 4. **Professional Demos** — Showing `:7777` in URLs looks unprofessional. Clean portless URLs look production-ready for client presentations.
 
-[See all 11 benefits](BENEFITS.md#mode-2-system-portless-urls) including hardcoded URL detection, browser extensions, mobile app testing, SSL/TLS certificates, and more.
+[See all 11 benefits](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-2-system-portless-urls) including hardcoded URL detection, browser extensions, mobile app testing, SSL/TLS certificates, and more.
 
 ### Mode 3: External Proxy
 
 Generate snippets for your existing proxy:
 
 ```bash
-devhost proxy export caddy    # Generate Caddy snippet
-devhost proxy export nginx    # Generate nginx config
+devhost proxy export --driver caddy   # Generate Caddy snippet
+devhost proxy export --driver nginx   # Generate nginx config
 devhost proxy attach caddy    # Attach to existing Caddyfile
 ```
 
@@ -208,13 +220,15 @@ devhost proxy attach caddy    # Attach to existing Caddyfile
 
 4. **Emergency Escape Hatch** — Devhost breaks, need to revert immediately? Detach removes only marked sections, preserves the rest. Safe experimentation with quick rollback.
 
-[See all 10 benefits](BENEFITS.md#mode-3-external-infrastructure-integration) including team consistency, custom features, multi-environment parity, legacy compatibility, and more.
+[See all 10 benefits](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-3-external-infrastructure-integration) including team consistency, custom features, multi-environment parity, legacy compatibility, and more.
 
 ## 📋 CLI Reference
 
 ### Core Commands
 
 ```bash
+devhost start                 # Start gateway router (Mode 1)
+devhost stop                  # Stop gateway router
 devhost add <name> <port>      # Add a route
 devhost remove <name>          # Remove a route
 devhost list                   # Show all routes
@@ -226,11 +240,11 @@ devhost status                 # Show mode and health
 ### Proxy Management
 
 ```bash
-devhost proxy start            # Start proxy (Gateway/System mode)
+devhost proxy start            # Start proxy (Mode 2: system)
 devhost proxy stop             # Stop proxy
 devhost proxy status           # Show proxy status
 devhost proxy upgrade --to system  # Upgrade to System mode
-devhost proxy export caddy     # Export Caddy snippet
+devhost proxy export --driver caddy  # Export Caddy snippet
 devhost proxy attach caddy     # Attach to existing config
 devhost proxy detach           # Detach from config
 ```
@@ -284,6 +298,20 @@ routes:
     domain: "localhost"
     enabled: true
 ```
+
+### Routes File
+
+Routes are stored in `~/.devhost/devhost.json` by default:
+
+```json
+{
+  "api": 8000,
+  "frontend": 3000,
+  "remote": "192.168.1.50:8080"
+}
+```
+
+Use `DEVHOST_CONFIG` to point Devhost at a project-local `devhost.json` (useful for mono-repos or team-shared route files).
 
 ### Project Config (Optional)
 
@@ -351,6 +379,8 @@ Supported providers:
 - **cloudflared** — Cloudflare Tunnel (free, no signup needed)
 - **ngrok** — Popular tunneling service
 - **localtunnel** — npm-based alternative
+
+> Tunnel providers are external CLIs. Install at least one (`cloudflared`, `ngrok`, or `lt`) and Devhost will use it.
 
 ## 🖥️ TUI Dashboard (Optional)
 
@@ -485,7 +515,7 @@ uvicorn app:app --host 127.0.0.1 --port 7777 --reload
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License - see [LICENSE](https://github.com/Patoruzuy/Devhost/blob/main/LICENSE) for details.
 
 ## 🙏 Contributing
 
