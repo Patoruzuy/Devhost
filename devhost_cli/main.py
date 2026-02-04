@@ -208,6 +208,37 @@ def main():
     env_parser.add_argument("--file", "-f", default=".env", help="Env file path (default: .env)")
     env_parser.add_argument("--dry-run", action="store_true", help="Show what would change")
 
+    # proxy command (external proxy integration)
+    proxy_parser = subparsers.add_parser("proxy", help="External proxy integration")
+    proxy_subparsers = proxy_parser.add_subparsers(dest="proxy_action", help="Proxy action")
+
+    # proxy export
+    proxy_export_parser = proxy_subparsers.add_parser("export", help="Export proxy config snippets")
+    proxy_export_parser.add_argument(
+        "--driver", "-d", choices=["caddy", "nginx", "traefik"], help="Specific driver (default: all)"
+    )
+    proxy_export_parser.add_argument("--show", "-s", action="store_true", help="Print snippet without saving")
+
+    # proxy discover
+    proxy_subparsers.add_parser("discover", help="Discover proxy config files")
+
+    # proxy attach
+    proxy_attach_parser = proxy_subparsers.add_parser("attach", help="Attach devhost to proxy config")
+    proxy_attach_parser.add_argument("driver", choices=["caddy", "nginx", "traefik"], help="Proxy driver")
+    proxy_attach_parser.add_argument("--config-path", "-c", help="Path to proxy config file")
+
+    # proxy detach
+    proxy_detach_parser = proxy_subparsers.add_parser("detach", help="Detach devhost from proxy config")
+    proxy_detach_parser.add_argument("--config-path", "-c", help="Path to proxy config file")
+
+    # proxy transfer
+    proxy_transfer_parser = proxy_subparsers.add_parser("transfer", help="Transfer to external proxy mode")
+    proxy_transfer_parser.add_argument("driver", choices=["caddy", "nginx", "traefik"], help="Proxy driver")
+    proxy_transfer_parser.add_argument("--config-path", "-c", help="Path to proxy config file")
+    proxy_transfer_parser.add_argument("--no-attach", action="store_true", help="Skip attaching to config")
+    proxy_transfer_parser.add_argument("--no-verify", action="store_true", help="Skip route verification")
+    proxy_transfer_parser.add_argument("--port", "-p", type=int, default=80, help="Proxy port (default: 80)")
+
     # install command
     install_parser = subparsers.add_parser("install", help="Run installer")
     install_parser.add_argument("--windows", action="store_true")
@@ -336,6 +367,39 @@ def main():
             else:
                 msg_error(f"Unknown env action: {args.action}")
                 success = False
+        elif args.command == "proxy":
+            from .proxy import (
+                cmd_proxy_attach,
+                cmd_proxy_detach,
+                cmd_proxy_discover,
+                cmd_proxy_export,
+                cmd_proxy_transfer,
+            )
+
+            if args.proxy_action == "export":
+                cmd_proxy_export(args.driver, args.show)
+                success = True
+            elif args.proxy_action == "discover":
+                cmd_proxy_discover()
+                success = True
+            elif args.proxy_action == "attach":
+                cmd_proxy_attach(args.driver, args.config_path)
+                success = True
+            elif args.proxy_action == "detach":
+                cmd_proxy_detach(args.config_path)
+                success = True
+            elif args.proxy_action == "transfer":
+                cmd_proxy_transfer(
+                    args.driver,
+                    args.config_path,
+                    args.no_attach,
+                    args.no_verify,
+                    args.port,
+                )
+                success = True
+            else:
+                msg_info("Usage: devhost proxy {export|discover|attach|detach|transfer}")
+                success = True
         elif args.command == "install":
             script_dir = Path(__file__).parent.parent.resolve()
             install_script = script_dir / "install.py"
