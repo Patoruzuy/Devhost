@@ -5,7 +5,7 @@ else
 PY=$(VENV)/bin/python
 endif
 
-.PHONY: venv install start test docker-up docker-build lint help devhost-url devhost-open devhost-list devhost-list-json devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info devhost-status-json completions-zsh completions-bash windows-setup
+.PHONY: venv install start test docker-up docker-build lint format dashboard tunnel proxy completions-zsh completions-bash windows-setup help
 
 venv:
 	python -m venv $(VENV)
@@ -15,7 +15,7 @@ install: venv
 	$(PY) -m pip install -r router/requirements.txt
 
 start: install
-	cd router && $(PY) -m uvicorn app:app --host 127.0.0.1 --port 5555 --reload
+	cd router && $(PY) -m uvicorn app:app --host 127.0.0.1 --port 7777 --reload
 
 test: install
 	$(PY) -m py_compile router/*.py
@@ -33,6 +33,15 @@ lint: install
 
 format: install
 	$(PY) -m ruff format .
+
+dashboard:
+	python -m devhost_cli.main dashboard
+
+tunnel:
+	python -m devhost_cli.main tunnel status
+
+proxy:
+	python -m devhost_cli.main proxy status
 
 devhost-url:
 	./devhost url
@@ -81,4 +90,4 @@ windows-setup:
 	powershell -ExecutionPolicy Bypass -File scripts\\setup-windows.ps1
 
 help:
-	@echo "Available targets: venv install start test docker-build docker-up lint devhost-url devhost-open devhost-list devhost-list-json devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info devhost-status-json completions-zsh completions-bash windows-setup"
+	@echo "Available targets: venv install start test docker-build docker-up lint format dashboard tunnel proxy completions-zsh completions-bash windows-setup"

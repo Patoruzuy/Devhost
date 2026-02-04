@@ -1,11 +1,10 @@
-version: '3.8'
 services:
   router:
     build:
       context: .
       dockerfile: router/Dockerfile
     ports:
-      - "5555:5555"
+      - "7777:7777"
     restart: unless-stopped
     volumes:
       - "./devhost.json:/app/devhost.json:ro"

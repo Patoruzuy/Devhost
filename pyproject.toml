@@ -43,6 +43,9 @@ tui = [
     "textual >= 0.47.0",
     "psutil >= 5.9",
 ]
+tunnel = [
+    "websockets ~= 12.0",
+]
 qr = [
     "segno >= 1.6",
 ]
