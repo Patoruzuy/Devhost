@@ -193,6 +193,21 @@ def main():
     integrity_parser = subparsers.add_parser("integrity", help="Check file integrity")
     integrity_parser.add_argument("action", nargs="?", default="check", choices=["check"], help="Integrity action")
 
+    # qr command
+    qr_parser = subparsers.add_parser("qr", help="Show QR code for mobile access")
+    qr_parser.add_argument("name", nargs="?", help="Service name (uses first if omitted)")
+
+    # oauth command
+    oauth_parser = subparsers.add_parser("oauth", help="Show OAuth redirect URIs")
+    oauth_parser.add_argument("name", nargs="?", help="Service name (uses first if omitted)")
+
+    # env command
+    env_parser = subparsers.add_parser("env", help="Environment file management")
+    env_parser.add_argument("action", choices=["sync"], help="Action: sync")
+    env_parser.add_argument("--name", "-n", help="Service name (uses first if omitted)")
+    env_parser.add_argument("--file", "-f", default=".env", help="Env file path (default: .env)")
+    env_parser.add_argument("--dry-run", action="store_true", help="Show what would change")
+
     # install command
     install_parser = subparsers.add_parser("install", help="Run installer")
     install_parser.add_argument("--windows", action="store_true")
@@ -305,6 +320,22 @@ def main():
                 success = cli.status()
         elif args.command == "integrity":
             success = cli.integrity_check()
+        elif args.command == "qr":
+            from .features import show_qr_for_route
+
+            success = show_qr_for_route(args.name)
+        elif args.command == "oauth":
+            from .features import show_oauth_for_route
+
+            success = show_oauth_for_route(args.name)
+        elif args.command == "env":
+            from .features import sync_env_file
+
+            if args.action == "sync":
+                success = sync_env_file(args.name, args.file, args.dry_run)
+            else:
+                msg_error(f"Unknown env action: {args.action}")
+                success = False
         elif args.command == "install":
             script_dir = Path(__file__).parent.parent.resolve()
             install_script = script_dir / "install.py"
