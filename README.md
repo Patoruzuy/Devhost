@@ -20,6 +20,48 @@ Devhost eliminates "port salad" by giving your local apps memorable subdomain UR
 - **Cross-Platform**: Windows, macOS, Linux
 - **Hot Reload**: Route changes take effect immediately
 
+## 🧭 Product Principles (Non-Negotiables)
+
+### What Devhost Does
+
+**Gateway Mode** (Default):
+- ✅ Routes all your local apps through a single port (7777)
+- ✅ Provides memorable subdomain URLs without admin permissions
+- ✅ Proxies HTTP and WebSocket traffic bidirectionally
+- ✅ Works immediately on all platforms (Windows, macOS, Linux)
+
+**System Mode** (Optional):
+- ✅ Manages Caddy lifecycle for portless URLs (80/443)
+- ✅ Generates Caddyfile from your routes automatically
+- ✅ Requires one-time admin setup, then runs seamlessly
+
+**External Mode** (Advanced):
+- ✅ Generates config snippets for your existing proxy (nginx/Traefik)
+- ✅ Detects config drift and offers emergency reset
+- ✅ Integrates with your infrastructure, doesn't replace it
+
+### What Devhost Does NOT Do
+
+- ❌ **Never surprise-edits user files**: Any edit to user-owned files (like existing Caddyfiles) must be explicit, backed up, and reversible
+- ❌ **No automatic LAN exposure**: Defaults to loopback (127.0.0.1) to prevent accidental network exposure
+- ❌ **No hidden state**: All configuration is in `~/.devhost/state.yml` and `devhost.json` — no mysterious database
+- ❌ **No process management beyond router/Caddy**: Won't start/stop your apps automatically (use `devhost run` explicitly)
+- ❌ **No production deployment**: Strictly for local development — never use in production environments
+
+### Clear Ownership Boundaries
+
+- **Devhost owns**: Router process, Caddy (in System mode), `~/.devhost/state.yml`, generated snippets
+- **You own**: Your apps, existing proxy configs, system DNS settings, hosts file entries
+- **Opt-in only**: Features like tunnel exposure, TUI dashboard, and External mode require explicit commands
+
+### One Mental Model Per Mode
+
+- **Gateway**: "Single port for everything, works immediately"
+- **System**: "Portless URLs with managed Caddy"
+- **External**: "Generate snippets for my existing setup"
+
+No ambiguity. Each mode has a clear, concrete outcome.
+
 ## 🚀 Quick Start
 
 ### Installation

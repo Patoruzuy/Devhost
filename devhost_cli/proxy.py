@@ -7,6 +7,7 @@ Provides snippet generation, attach/detach, discovery, and transfer for:
 - Traefik
 """
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -75,11 +76,14 @@ def _generate_nginx_snippet(routes: dict[str, dict], domain: str) -> str:
         route_domain = route.get("domain", domain)
         host = f"{name}.{route_domain}"
 
-        # Ensure upstream is just host:port for proxy_pass
-        if upstream.startswith("http://"):
-            upstream = upstream[7:]
-        elif upstream.startswith("https://"):
+        # Preserve upstream scheme for proxy_pass
+        upstream_scheme = "http"
+        if upstream.startswith("https://"):
+            upstream_scheme = "https"
             upstream = upstream[8:]
+        elif upstream.startswith("http://"):
+            upstream_scheme = "http"
+            upstream = upstream[7:]
 
         lines.extend(
             [
@@ -87,7 +91,7 @@ def _generate_nginx_snippet(routes: dict[str, dict], domain: str) -> str:
                 "    listen 80;",
                 f"    server_name {host};",
                 "    location / {",
-                f"        proxy_pass http://{upstream};",
+                f"        proxy_pass {upstream_scheme}://{upstream};",
                 "        proxy_http_version 1.1;",
                 "        proxy_set_header Host $host;",
                 "        proxy_set_header X-Real-IP $remote_addr;",
@@ -342,21 +346,70 @@ def attach_to_config(
     # Create and insert marker block
     marker_block = _create_marker_block(driver, snippet_path)
 
-    # Insert at the beginning of the file (after any initial comments)
     lines = content.split("\n")
-    insert_idx = 0
 
-    # Skip leading comments and empty lines
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and not stripped.startswith("//"):
-            insert_idx = i
-            break
-        insert_idx = i + 1
+    def _strip_nginx_comment(line: str) -> str:
+        if "#" in line:
+            return line.split("#", 1)[0]
+        return line
 
-    lines.insert(insert_idx, "")
-    lines.insert(insert_idx + 1, marker_block)
-    lines.insert(insert_idx + 2, "")
+    def _indent_block(block: str, indent: str) -> list[str]:
+        return [f"{indent}{line}" if line else line for line in block.splitlines()]
+
+    def _find_nginx_http_insert(lines_in: list[str]) -> tuple[int, str] | None:
+        depth = 0
+        for idx, raw in enumerate(lines_in):
+            no_comment = _strip_nginx_comment(raw)
+            stripped = no_comment.strip()
+
+            if depth == 0:
+                if re.match(r"^http\b\s*\{", stripped):
+                    indent = re.match(r"^(\s*)", raw).group(1) + "    "
+                    return (idx + 1, indent)
+                if stripped == "http":
+                    for j in range(idx + 1, len(lines_in)):
+                        next_raw = lines_in[j]
+                        next_stripped = _strip_nginx_comment(next_raw).strip()
+                        if not next_stripped:
+                            continue
+                        if next_stripped.startswith("{"):
+                            indent = re.match(r"^(\s*)", next_raw).group(1) + "    "
+                            return (j + 1, indent)
+                        break
+
+            depth += no_comment.count("{") - no_comment.count("}")
+
+        return None
+
+    if driver == "nginx":
+        nginx_insert = _find_nginx_http_insert(lines)
+        if nginx_insert:
+            insert_idx, indent = nginx_insert
+            marker_lines = _indent_block(marker_block, indent)
+            lines[insert_idx:insert_idx] = ["", *marker_lines, ""]
+        else:
+            # Assume conf.d-style file already included within http context
+            insert_idx = 0
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and not stripped.startswith("//"):
+                    insert_idx = i
+                    break
+                insert_idx = i + 1
+            lines[insert_idx:insert_idx] = ["", marker_block, ""]
+    else:
+        # Insert at the beginning of the file (after any initial comments)
+        insert_idx = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and not stripped.startswith("//"):
+                insert_idx = i
+                break
+            insert_idx = i + 1
+
+        lines.insert(insert_idx, "")
+        lines.insert(insert_idx + 1, marker_block)
+        lines.insert(insert_idx + 2, "")
 
     new_content = "\n".join(lines)
     config_path.write_text(new_content, encoding="utf-8")
@@ -406,6 +459,9 @@ def detach_from_config(state: StateConfig, config_path: Path) -> tuple[bool, str
     new_content = before + "\n\n" + after if before else after
 
     config_path.write_text(new_content, encoding="utf-8")
+
+    # Record hash for drift detection
+    state.record_hash(config_path)
 
     return (True, f"Detached devhost from {config_path}")
 
@@ -509,6 +565,12 @@ def transfer_to_external(
         if not success:
             return (False, f"Attach failed: {msg}")
         print_success(msg)
+    else:
+        # Persist external driver/config even when attach is skipped
+        if config_path is not None:
+            state.set_external_config(driver, str(config_path))
+        else:
+            state.set_external_config(driver)
 
     # Step 3: Verify routes
     if verify:

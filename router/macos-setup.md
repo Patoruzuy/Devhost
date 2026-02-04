@@ -71,7 +71,7 @@ Developer notes
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app:app --reload --host 127.0.0.1 --port 5555
+uvicorn app:app --reload --host 127.0.0.1 --port 7777
 ```
 
 - If you prefer a managed approach, use the provided `devhost-router.plist.tmpl` to point at the venv `uvicorn` binary (example: `/Users/you/devhost/.venv/bin/uvicorn`).
