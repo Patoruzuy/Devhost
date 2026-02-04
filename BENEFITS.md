@@ -69,8 +69,9 @@ Complete list of concrete benefits for each mode, showing how Devhost removes fr
 
 ### 2. IoT/Home Lab Access
 - **Problem**: Raspberry Pi at `192.168.1.50:8080`, NAS at `192.168.1.100:5000`
-- **Solution**: `http://homelab.localhost`, `http://nas.localhost`
+- **Solution**: `http://homelab.raspberry`, `http://nas.home`, or any custom domain you want
 - **Benefit**: Forget IPs and ports, use memorable names across your local network
+- **How**: Set `DEVHOST_DOMAIN=home` (or `raspberry`, `lab`, etc.) — not limited to `.localhost`!
 
 ### 3. Hardcoded URL Detection
 - **Problem**: Code with hardcoded ports breaks in production

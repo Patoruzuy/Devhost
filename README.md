@@ -180,7 +180,7 @@ devhost proxy upgrade --to system
 
 1. **Production URL Matching** — Production uses `app.example.com`, dev uses `localhost:3000`? Use `app.localhost` to mirror production URL structure and catch bugs early.
 
-2. **IoT & Home Lab Access** — Raspberry Pi at `192.168.1.50:8080`, NAS at `192.168.1.100:5000`? Use `http://homelab.localhost` and `http://nas.localhost` — forget IPs and ports across your local network.
+2. **IoT & Home Lab Access** — Raspberry Pi at `192.168.1.50:8080`, NAS at `192.168.1.100:5000`? Use `http://homelab.raspberry` or `http://nas.home` — forget IPs and ports across your local network. (Use any domain you want, not just `.localhost`!)
 
 3. **Third-Party Integrations** — Payment/auth providers whitelist domains without ports. `payments.localhost` (no port) matches their requirements for realistic local testing.
 
@@ -301,9 +301,11 @@ auto_register: true
 | Variable | Description |
 |----------|-------------|
 | `DEVHOST_CONFIG` | Override config file path |
-| `DEVHOST_DOMAIN` | Override base domain |
+| `DEVHOST_DOMAIN` | Override base domain (default: `localhost`). Examples: `home`, `lab`, `dev` |
 | `DEVHOST_LOG_LEVEL` | Log verbosity (DEBUG/INFO/WARNING/ERROR) |
 | `DEVHOST_LOG_REQUESTS` | Enable per-request logging (1/true) |
+
+**Custom Domains**: Set `DEVHOST_DOMAIN=home` to use `http://api.home:7777` instead of `http://api.localhost:7777`. Perfect for IoT/home lab setups!
 
 ## 🐳 Docker
 

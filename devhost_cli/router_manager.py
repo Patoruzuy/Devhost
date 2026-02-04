@@ -61,7 +61,7 @@ class Router:
         try:
             import urllib.request
 
-            req = urllib.request.Request("http://127.0.0.1:5555/health")
+            req = urllib.request.Request("http://127.0.0.1:7777/health")
             with urllib.request.urlopen(req, timeout=2) as response:
                 return response.status == 200
         except Exception:

@@ -4,13 +4,15 @@ import logging
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.background import BackgroundTask
 
 try:
     import websockets
@@ -20,7 +22,21 @@ try:
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
 
-app = FastAPI()
+# Global client
+http_client: httpx.AsyncClient | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global http_client
+    # Disable timeouts for the client itself, control per-request or keep defaults
+    # Limits might be needed for high concurrency
+    http_client = httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=20, max_connections=100))
+    yield
+    await http_client.aclose()
+
+
+app = FastAPI(lifespan=lifespan)
 
 LOG_LEVEL = os.getenv("DEVHOST_LOG_LEVEL", "INFO").upper()
 LOG_FILE = os.getenv("DEVHOST_LOG_FILE")
@@ -437,39 +453,58 @@ async def wildcard_proxy(request: Request, full_path: str):
             )
         logger.warning("[%s] Invalid Host header: %s", request_id, host_header)
         return JSONResponse({"error": "Missing or invalid Host header", "request_id": request_id}, status_code=400)
+headers = dict(request.headers)
+    # remove host header so upstream sees correct host
+    headers.pop("host", None)
 
-    target_value = routes.get(subdomain)
-    target = parse_target(target_value)
-    if not target:
+    # Use globally shared client
+    global http_client
+    # Fallback if lifecycle didn't run (e.g. some tests)
+    if http_client is None:
+        http_client = httpx.AsyncClient()
+
+    async def request_body_stream():
+        async for chunk in request.stream():
+            yield chunk
+
+    req = http_client.build_request(
+        method=request.method,
+        url=url,
+        headers=headers,
+        content=request_body_stream(),
+        timeout=30.0,
+    )
+
+    try:
+        upstream_resp = await http_client.send(req, stream=True)
+    except httpx.RequestError as exc:
         request_id = str(uuid.uuid4())[:8]
-        logger.info("[%s] No route found for %s.%s", request_id, subdomain, base_domain)
-        return JSONResponse(
-            {"error": f"No route found for {subdomain}.{base_domain}", "request_id": request_id}, status_code=404
+        logger.warning(
+            "[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc
         )
-    target_scheme, target_host, target_port = target
+        return JSONResponse({"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502)
 
-    # build upstream URL and preserve query string
-    url = f"{target_scheme}://{target_host}:{target_port}{request.url.path}"
-    if request.url.query:
-        url = url + "?" + request.url.query
+    # Filter hop-by-hop headers
+    excluded = {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+        "content-encoding",  # Let upstream handle encoding, or httpx might decompress
+        "content-length",    # Length changes if we process it
+    }
+    resp_headers = {k: v for k, v in upstream_resp.headers.items() if k.lower() not in excluded}
 
-    async with httpx.AsyncClient() as client:
-        headers = dict(request.headers)
-        # remove host header so upstream sees correct host
-        headers.pop("host", None)
-        try:
-            proxy_resp = await client.request(
-                method=request.method,
-                url=url,
-                headers=headers,
-                content=await request.body(),
-                timeout=30.0,
-            )
-        except httpx.RequestError as exc:
-            request_id = str(uuid.uuid4())[:8]
-            logger.warning(
-                "[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc
-            )
+    return StreamingResponse(
+        upstream_resp.aiter_bytes(),
+        status_code=upstream_resp.status_code,
+        headers=resp_headers,
+        background=BackgroundTask(upstream_resp.aclose),
+    
             return JSONResponse({"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502)
 
     # Filter hop-by-hop headers
