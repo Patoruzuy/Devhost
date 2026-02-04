@@ -14,7 +14,7 @@ def run_flask(
     name: str | None = None,
     port: int | None = None,
     domain: str = "localhost",
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     debug: bool = False,
     use_reloader: bool = False,
     socketio: Any | None = None,
@@ -28,7 +28,7 @@ def run_flask(
         name: App name (becomes subdomain). Auto-detected from devhost.yml or directory
         port: Port to run on. Auto-detected if not specified
         domain: Base domain (default: localhost)
-        host: Host to bind to (default: 0.0.0.0)
+        host: Host to bind to (default: 127.0.0.1 for security)
         debug: Enable Flask debug mode (default: False)
         use_reloader: Enable auto-reload on code changes (default: False)
         socketio: Flask-SocketIO instance for WebSocket support

@@ -14,7 +14,7 @@ def run_django(
     name: str | None = None,
     port: int | None = None,
     domain: str = "localhost",
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     **kwargs,
 ):
     """
@@ -28,7 +28,7 @@ def run_django(
         name: App name (becomes subdomain). Auto-detected from devhost.yml or directory
         port: Port to run on. Auto-detected if not specified
         domain: Base domain (default: localhost)
-        host: Host to bind to (default: 0.0.0.0)
+        host: Host to bind to (default: 127.0.0.1 for security)
         **kwargs: Additional arguments
 
     Example:

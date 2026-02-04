@@ -57,7 +57,7 @@ class DevhostRunner:
         name: str | None = None,
         port: int | None = None,
         domain: str | None = None,
-        host: str = "0.0.0.0",
+        host: str = "127.0.0.1",
         auto_register: bool = True,
         auto_caddy: bool = True,
         **kwargs,
@@ -349,7 +349,7 @@ def run(
     name: str | None = None,
     port: int | None = None,
     domain: str | None = None,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     auto_register: bool = True,
     auto_caddy: bool = True,
     **kwargs,
@@ -362,7 +362,7 @@ def run(
         name: App name (becomes subdomain). Auto-detected from devhost.yml or directory
         port: Port to run on. Auto-detected if not specified
         domain: Base domain (default: localhost)
-        host: Host to bind to (default: 0.0.0.0)
+        host: Host to bind to (default: 127.0.0.1 for security)
         auto_register: Register route in devhost.json (default: True)
         auto_caddy: Prompt to start Caddy for port 80 (default: True)
         **kwargs: Additional arguments passed to the framework's run method

@@ -20,8 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from .config import Config
 from .output import msg_error, msg_info, msg_success, msg_warning
 from .state import StateConfig
+from .validation import parse_target
 
 TunnelProvider = Literal["cloudflared", "ngrok", "localtunnel"]
 
@@ -129,28 +131,46 @@ def start_tunnel(
     Returns:
         True if tunnel started successfully
     """
-    # Resolve route
+    def _load_routes_from_config() -> dict[str, dict]:
+        config = Config()
+        data = config.load()
+        routes_from_config: dict[str, dict] = {}
+        for name, target in data.items():
+            if isinstance(target, int):
+                upstream = str(target)
+            else:
+                upstream = str(target)
+            routes_from_config[name] = {
+                "upstream": upstream,
+                "domain": config.get_domain(),
+                "enabled": True,
+            }
+        return routes_from_config
+
+    # Resolve route (prefer state, fallback to config)
     if not route_name:
-        routes = state.routes
+        routes = state.routes or _load_routes_from_config()
         if not routes:
             msg_error("No routes configured. Add a route first.")
             return False
         route_name = next(iter(routes.keys()))
-
-    route = state.get_route(route_name)
-    if not route:
-        msg_error(f"Route '{route_name}' not found.")
-        return False
-
-    # Parse upstream to get port
-    upstream = route.get("upstream", "")
-    if ":" in upstream:
-        port = int(upstream.split(":")[-1])
-    elif upstream.isdigit():
-        port = int(upstream)
+        route = routes[route_name]
     else:
-        msg_error(f"Cannot determine port from upstream: {upstream}")
+        route = state.get_route(route_name)
+        if not route:
+            routes = _load_routes_from_config()
+            route = routes.get(route_name)
+        if not route:
+            msg_error(f"Route '{route_name}' not found.")
+            return False
+
+    upstream = str(route.get("upstream", ""))
+    parsed = parse_target(upstream)
+    if not parsed:
+        msg_error(f"Invalid upstream target for tunnel: {upstream}")
         return False
+    scheme, host, port = parsed
+    target_url = f"{scheme}://{host}:{port}"
 
     # Detect or validate provider
     if not provider:
@@ -186,15 +206,15 @@ def start_tunnel(
         return False
 
     # Start the tunnel process
-    msg_info(f"Starting {provider} tunnel for {route_name} (port {port})...")
+    msg_info(f"Starting {provider} tunnel for {route_name} -> {target_url}...")
 
     try:
         if provider == "cloudflared":
-            proc = _start_cloudflared(exe, port, route_name)
+            proc = _start_cloudflared(exe, target_url, route_name)
         elif provider == "ngrok":
-            proc = _start_ngrok(exe, port, route_name)
+            proc = _start_ngrok(exe, port, target_url, route_name)
         elif provider == "localtunnel":
-            proc = _start_localtunnel(exe, port, route_name)
+            proc = _start_localtunnel(exe, port, host, scheme, route_name)
         else:
             msg_error(f"Unknown provider: {provider}")
             return False
