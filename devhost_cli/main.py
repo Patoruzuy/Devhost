@@ -209,8 +209,27 @@ def main():
     env_parser.add_argument("--dry-run", action="store_true", help="Show what would change")
 
     # proxy command (external proxy integration)
-    proxy_parser = subparsers.add_parser("proxy", help="External proxy integration")
+    proxy_parser = subparsers.add_parser("proxy", help="Proxy management (Mode 2/3)")
     proxy_subparsers = proxy_parser.add_subparsers(dest="proxy_action", help="Proxy action")
+
+    # proxy start
+    proxy_subparsers.add_parser("start", help="Start proxy (Mode 2: system)")
+
+    # proxy stop
+    proxy_stop_parser = proxy_subparsers.add_parser("stop", help="Stop proxy (Mode 2: system)")
+    proxy_stop_parser.add_argument("--force", "-f", action="store_true", help="Force stop even with active routes")
+
+    # proxy status
+    proxy_subparsers.add_parser("status", help="Show proxy status")
+
+    # proxy reload
+    proxy_subparsers.add_parser("reload", help="Reload proxy config (Mode 2: system)")
+
+    # proxy upgrade
+    proxy_upgrade_parser = proxy_subparsers.add_parser("upgrade", help="Upgrade proxy mode")
+    proxy_upgrade_parser.add_argument(
+        "--to", dest="to_mode", choices=["gateway", "system"], required=True, help="Target mode"
+    )
 
     # proxy export
     proxy_export_parser = proxy_subparsers.add_parser("export", help="Export proxy config snippets")
@@ -368,6 +387,13 @@ def main():
                 msg_error(f"Unknown env action: {args.action}")
                 success = False
         elif args.command == "proxy":
+            from .caddy_lifecycle import (
+                cmd_proxy_reload,
+                cmd_proxy_start,
+                cmd_proxy_status,
+                cmd_proxy_stop,
+                cmd_proxy_upgrade,
+            )
             from .proxy import (
                 cmd_proxy_attach,
                 cmd_proxy_detach,
@@ -376,7 +402,17 @@ def main():
                 cmd_proxy_transfer,
             )
 
-            if args.proxy_action == "export":
+            if args.proxy_action == "start":
+                success = cmd_proxy_start()
+            elif args.proxy_action == "stop":
+                success = cmd_proxy_stop(args.force)
+            elif args.proxy_action == "status":
+                success = cmd_proxy_status()
+            elif args.proxy_action == "reload":
+                success = cmd_proxy_reload()
+            elif args.proxy_action == "upgrade":
+                success = cmd_proxy_upgrade(args.to_mode)
+            elif args.proxy_action == "export":
                 cmd_proxy_export(args.driver, args.show)
                 success = True
             elif args.proxy_action == "discover":
@@ -398,7 +434,9 @@ def main():
                 )
                 success = True
             else:
-                msg_info("Usage: devhost proxy {export|discover|attach|detach|transfer}")
+                msg_info(
+                    "Usage: devhost proxy {start|stop|status|reload|upgrade|export|discover|attach|detach|transfer}"
+                )
                 success = True
         elif args.command == "install":
             script_dir = Path(__file__).parent.parent.resolve()
