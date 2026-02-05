@@ -11,6 +11,10 @@ logger = logging.getLogger("devhost.validation")
 # Security: Only allow http/https schemes
 ALLOWED_SCHEMES = {"http", "https"}
 
+# RFC 1035: Length limits for DNS names (imported from router.security)
+# Route names are DNS labels/subdomains and must follow RFC 1035 constraints
+MAX_ROUTE_NAME_LENGTH = 63  # RFC 1035 Section 2.3.4: DNS label max length
+
 
 def validate_name(name: str) -> bool:
     """Validate mapping name"""
@@ -23,9 +27,9 @@ def validate_name(name: str) -> bool:
         msg_error("Name must contain only letters, numbers, and hyphens")
         return False
 
-    # Max length
-    if len(name) > 63:
-        msg_error("Name too long (max 63 characters)")
+    # Max length (RFC 1035: DNS label limit)
+    if len(name) > MAX_ROUTE_NAME_LENGTH:
+        msg_error(f"Name too long: {len(name)} chars (max {MAX_ROUTE_NAME_LENGTH} per RFC 1035)")
         return False
 
     return True

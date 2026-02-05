@@ -7,6 +7,13 @@ import socket
 
 logger = logging.getLogger("devhost.security")
 
+# RFC 1035/1123: Length limits for DNS names
+# https://datatracker.ietf.org/doc/html/rfc1035 (Section 2.3.4)
+# https://datatracker.ietf.org/doc/html/rfc1123 (Section 2.1)
+MAX_HOSTNAME_LENGTH = 253  # Maximum total hostname length (RFC 1035)
+MAX_LABEL_LENGTH = 63      # Maximum length of a single DNS label (RFC 1035)
+MAX_ROUTE_NAME_LENGTH = 63 # Maximum length for route/subdomain names (same as DNS label)
+
 # RFC 1918 private networks + link-local
 BLOCKED_NETWORKS = [
     ipaddress.ip_network("10.0.0.0/8"),
@@ -65,13 +72,13 @@ def validate_hostname(hostname: str) -> tuple[bool, str | None]:
     if not all(c.isalnum() or c in ".-" for c in hostname):
         return (False, "Hostname contains invalid characters")
 
-    if len(hostname) > 253:
-        return (False, f"Hostname too long: {len(hostname)} chars (max 253)")
+    if len(hostname) > MAX_HOSTNAME_LENGTH:
+        return (False, f"Hostname too long: {len(hostname)} chars (max {MAX_HOSTNAME_LENGTH} per RFC 1035)")
 
     labels = hostname.split(".")
     for label in labels:
-        if len(label) > 63:
-            return (False, f"Label {label} too long (max 63 chars)")
+        if len(label) > MAX_LABEL_LENGTH:
+            return (False, f"Label '{label}' too long: {len(label)} chars (max {MAX_LABEL_LENGTH} per RFC 1035)")
         if not label:
             return (False, "Empty label in hostname")
 
