@@ -68,7 +68,76 @@ python -m unittest discover -v
 - Update to [docs/security-configuration.md](docs/security-configuration.md)
 - Mention in [CHANGELOG.md](CHANGELOG.md) with severity rating
 
-### 4. Test Your Changes Manually
+### 4. Update Dependencies
+
+**Weekly automated scans** run every Monday via [.github/workflows/security-scan.yml](.github/workflows/security-scan.yml).
+
+**Responding to vulnerability alerts:**
+
+When the automated security scan creates a GitHub issue:
+
+1. Review the issue details (package name, CVE, severity)
+2. Update the affected package:
+   ```bash
+   pip install --upgrade <package-name>
+   ```
+3. Verify the fix resolves the vulnerability:
+   ```bash
+   pip-audit --desc
+   ```
+4. Run the full test suite to ensure no regressions:
+   ```bash
+   python -m unittest discover
+   ```
+5. Commit with security prefix:
+   ```bash
+   git commit -m "security: Update <package> to fix CVE-YYYY-XXXXX"
+   ```
+
+**Manual dependency updates:**
+
+```bash
+# Update specific package
+pip install --upgrade httpx
+
+# Update all router dependencies
+pip install --upgrade -r router/requirements.txt
+
+# Update development dependencies
+pip install --upgrade -e ".[dev,all]"
+
+# Verify no vulnerabilities after updates
+pip-audit --desc
+```
+
+**Viewing SBOM (Software Bill of Materials):**
+
+The weekly security scan generates SBOMs for supply chain transparency:
+
+- Download from [GitHub Actions artifacts](https://github.com/yourusername/devhost/actions/workflows/security-scan.yml)
+- `sbom-cyclonedx.json` - Machine-readable format for automated tools
+- `sbom-cyclonedx.xml` - Compliance documentation format
+
+**GitHub Actions security:**
+
+All GitHub Actions are pinned to commit SHAs to prevent supply chain attacks:
+
+```yaml
+# Example: pinned to specific commit
+- uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+```
+
+When updating action versions:
+1. Check the official release page for the new version's commit SHA
+2. Verify the SHA matches the tagged release
+3. Update both the SHA and the version comment
+4. Test the workflow to ensure it still works
+
+**Dependency pinning limitations:**
+
+Note: Automated dependency pinning with `pip-tools` is currently blocked due to Python 3.13 compatibility issues. Manual dependency management is recommended until this is resolved. See [docs/PHASE3-PLAN.md](docs/PHASE3-PLAN.md) for details.
+
+### 5. Test Your Changes Manually
 
 Before submitting, verify your changes work as expected:
 
@@ -86,7 +155,7 @@ devhost add myapp 8000
 devhost open myapp
 ```
 
-### 5. Update Documentation
+### 6. Update Documentation
 
 If your changes affect user-facing functionality:
 
@@ -95,7 +164,7 @@ If your changes affect user-facing functionality:
 - Update [examples/](examples/) if adding new integration patterns
 - Add docstrings to new functions/classes
 
-### 6. Commit Message Guidelines
+### 7. Commit Message Guidelines
 
 Write clear, descriptive commit messages:
 
