@@ -62,7 +62,28 @@ Devhost eliminates "port salad" by giving your local apps memorable subdomain UR
 
 No ambiguity. Each mode has a clear, concrete outcome.
 
-## 🚀 Quick Start
+## � Security
+
+Devhost v3.0 implements defense-in-depth security measures:
+
+- **SSRF Protection**: Blocks access to cloud metadata endpoints (AWS EC2, GCP, Azure) and private networks by default
+- **URL Scheme Validation**: Only allows `http://` and `https://` — rejects `file://`, `ftp://`, and other dangerous schemes
+- **Host Header Injection Prevention**: Validates hostnames against RFC 1123 to prevent header smuggling attacks
+- **Privilege Escalation Prevention** (Windows): Requires administrator privileges for hosts file modifications with confirmation prompts
+- **Localhost-Only Default**: All services bind to `127.0.0.1` by default — no accidental LAN exposure
+
+For local development scenarios requiring private network access:
+
+```bash
+# Enable proxying to private IPs (192.168.x.x, 10.x.x.x)
+export DEVHOST_ALLOW_PRIVATE_NETWORKS=1
+```
+
+⚠️ **Security Warning**: Never enable private network access in production environments.
+
+📖 **Full documentation**: [docs/security-configuration.md](docs/security-configuration.md)
+
+## �🚀 Quick Start
 
 ### Installation
 

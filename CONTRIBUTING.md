@@ -38,7 +38,37 @@ python -m unittest discover -v
 
 All tests must pass (100% pass rate). Do not submit PRs with failing tests.
 
-### 3. Test Your Changes Manually
+### 3. Run Security Tests
+
+**Critical for security-related PRs:**
+
+Security tests validate protection against SSRF, header injection, privilege escalation, and other vulnerabilities. All security tests must pass.
+
+```bash
+# Run full security test suite
+python -m unittest discover -s tests -p "test_security_*.py" -v
+
+# Run specific security tests
+python -m unittest tests.test_security_ssrf -v           # SSRF protection
+python -m unittest tests.test_security_headers -v        # Host header validation
+python -m unittest tests.test_security_schemes -v        # URL scheme validation
+
+# Run all tests including security
+python -m unittest discover -v
+```
+
+**Security test requirements:**
+- All SSRF protection tests must pass (blocks metadata endpoints, private IPs)
+- All hostname validation tests must pass (prevents header injection)
+- All URL scheme tests must pass (rejects file://, ftp://, etc.)
+- Windows-specific tests may be skipped on non-Windows platforms
+
+**Security-related changes require:**
+- New test coverage for new attack vectors
+- Update to [docs/security-configuration.md](docs/security-configuration.md)
+- Mention in [CHANGELOG.md](CHANGELOG.md) with severity rating
+
+### 4. Test Your Changes Manually
 
 Before submitting, verify your changes work as expected:
 
@@ -56,7 +86,7 @@ devhost add myapp 8000
 devhost open myapp
 ```
 
-### 4. Update Documentation
+### 5. Update Documentation
 
 If your changes affect user-facing functionality:
 
@@ -65,7 +95,7 @@ If your changes affect user-facing functionality:
 - Update [examples/](examples/) if adding new integration patterns
 - Add docstrings to new functions/classes
 
-### 5. Commit Message Guidelines
+### 6. Commit Message Guidelines
 
 Write clear, descriptive commit messages:
 
