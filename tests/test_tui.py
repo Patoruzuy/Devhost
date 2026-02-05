@@ -8,8 +8,8 @@ from unittest.mock import Mock
 
 try:
     from devhost_tui.app import DevhostDashboard
-    from devhost_tui.modals import AddRouteWizard
-    from devhost_tui.widgets import DetailsPane, IntegrityPanel
+    from devhost_tui.modals import AddRouteWizard, ExternalProxyModal
+    from devhost_tui.widgets import DetailsPane, FlowDiagram, IntegrityPanel
 except Exception as exc:  # pragma: no cover - optional dependency
     raise unittest.SkipTest("textual is not available") from exc
 
@@ -218,8 +218,12 @@ class IntegritySummaryTests(unittest.TestCase):
             def query_one(self, selector, expect_type=None):  # type: ignore[override]
                 if selector == "#verify-content":
                     return self._verify
-                if selector == "#flow-content" or selector == "#config-content":
+                if selector == "#flow-content":
                     return SimpleNamespace(update=lambda *_args, **_kwargs: None)
+                if selector == "#config-content":
+                    return SimpleNamespace(update=lambda *_args, **_kwargs: None)
+                if selector == FlowDiagram:
+                    return SimpleNamespace(show_flow=lambda *_args, **_kwargs: None)
                 if selector == IntegrityPanel:
                     return SimpleNamespace(update_integrity=lambda *_args, **_kwargs: None)
                 return SimpleNamespace(update=lambda *_args, **_kwargs: None)
@@ -250,8 +254,12 @@ class ProbeErrorTests(unittest.TestCase):
             def query_one(self, selector, expect_type=None):  # type: ignore[override]
                 if selector == "#verify-content":
                     return self._verify
-                if selector == "#flow-content" or selector == "#config-content":
+                if selector == "#flow-content":
                     return SimpleNamespace(update=lambda *_args, **_kwargs: None)
+                if selector == "#config-content":
+                    return SimpleNamespace(update=lambda *_args, **_kwargs: None)
+                if selector == FlowDiagram:
+                    return SimpleNamespace(show_flow=lambda *_args, **_kwargs: None)
                 if selector == IntegrityPanel:
                     return SimpleNamespace(update_integrity=lambda *_args, **_kwargs: None)
                 return SimpleNamespace(update=lambda *_args, **_kwargs: None)
@@ -272,6 +280,82 @@ class ProbeErrorTests(unittest.TestCase):
         details.show_route("api", route, state, probe_results, {})
         self.assertIn("Route Error: HTTP 502", details._verify.text)
         self.assertIn("Upstream Error: TCP connect failed", details._verify.text)
+
+
+class IntegrityResolveTests(unittest.TestCase):
+    def test_resolve_integrity_accept(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        tmp.write(b"data")
+        tmp.close()
+        try:
+            fake_state = SimpleNamespace(
+                record_hash=Mock(),
+                remove_hash=Mock(),
+                check_all_integrity=Mock(return_value={}),
+            )
+            fake_self = SimpleNamespace(
+                state=fake_state,
+                notify=Mock(),
+                _apply_integrity_results=Mock(),
+            )
+            DevhostDashboard.resolve_integrity(fake_self, tmp.name, "accept")
+            fake_state.record_hash.assert_called_once_with(Path(tmp.name))
+            fake_self._apply_integrity_results.assert_called_once_with({})
+        finally:
+            Path(tmp.name).unlink(missing_ok=True)
+
+    def test_resolve_integrity_ignore(self):
+        fake_state = SimpleNamespace(
+            record_hash=Mock(),
+            remove_hash=Mock(),
+            check_all_integrity=Mock(return_value={}),
+        )
+        fake_self = SimpleNamespace(
+            state=fake_state,
+            notify=Mock(),
+            _apply_integrity_results=Mock(),
+        )
+        DevhostDashboard.resolve_integrity(fake_self, "C:/tmp/example.conf", "ignore")
+        fake_state.remove_hash.assert_called_once_with(Path("C:/tmp/example.conf"))
+        fake_self._apply_integrity_results.assert_called_once_with({})
+
+
+class ExternalProxyActionTests(unittest.TestCase):
+    def test_action_external_proxy_opens_modal(self):
+        fake_self = SimpleNamespace(push_screen=Mock())
+        DevhostDashboard.action_external_proxy(fake_self)
+        args, _kwargs = fake_self.push_screen.call_args
+        self.assertIsInstance(args[0], ExternalProxyModal)
+
+
+class NextActionTests(unittest.TestCase):
+    def test_next_action_apply_when_draft(self):
+        fake_session = SimpleNamespace(has_changes=Mock(return_value=True), routes={}, proxy_mode="gateway")
+        fake_self = SimpleNamespace(session=fake_session, _integrity_results={}, state=SimpleNamespace(external_config_path=None))
+        msg = DevhostDashboard._compute_next_action(fake_self)
+        self.assertIn("Apply", msg)
+
+    def test_next_action_add_route_when_empty(self):
+        fake_session = SimpleNamespace(has_changes=Mock(return_value=False), routes={}, proxy_mode="gateway")
+        fake_self = SimpleNamespace(session=fake_session, _integrity_results={}, state=SimpleNamespace(external_config_path=None))
+        msg = DevhostDashboard._compute_next_action(fake_self)
+        self.assertIn("Add your first route", msg)
+
+    def test_next_action_integrity_drift(self):
+        fake_session = SimpleNamespace(has_changes=Mock(return_value=False), routes={"api": {}}, proxy_mode="gateway")
+        fake_self = SimpleNamespace(
+            session=fake_session,
+            _integrity_results={"file": (False, "modified")},
+            state=SimpleNamespace(external_config_path=None),
+        )
+        msg = DevhostDashboard._compute_next_action(fake_self)
+        self.assertIn("Resolve integrity drift", msg)
+
+    def test_next_action_external_attach(self):
+        fake_session = SimpleNamespace(has_changes=Mock(return_value=False), routes={"api": {}}, proxy_mode="external")
+        fake_self = SimpleNamespace(session=fake_session, _integrity_results={}, state=SimpleNamespace(external_config_path=None))
+        msg = DevhostDashboard._compute_next_action(fake_self)
+        self.assertIn("Attach external proxy", msg)
 
 
 if __name__ == "__main__":

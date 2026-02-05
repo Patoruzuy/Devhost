@@ -256,6 +256,14 @@ class StateConfig:
             self._state.setdefault("integrity", {}).setdefault("hashes", {})[abs_path] = file_hash
             self._save()
 
+    def remove_hash(self, filepath: Path) -> None:
+        """Remove a file from integrity tracking"""
+        abs_path = str(filepath.resolve())
+        hashes = self._state.setdefault("integrity", {}).setdefault("hashes", {})
+        if abs_path in hashes:
+            del hashes[abs_path]
+            self._save()
+
     def check_hash(self, filepath: Path) -> tuple[bool, str | None]:
         """
         Check if a file matches its recorded hash.

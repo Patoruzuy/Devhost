@@ -18,12 +18,14 @@ from textual.widgets import (
     DataTable,
     Footer,
     Header,
+    Static,
 )
 
 from devhost_cli.state import StateConfig
 from .session import SessionState
 from devhost_cli.validation import parse_target
 
+from .scanner import ListeningPort, scan_listening_ports
 from .widgets import DetailsPane, Sidebar, StatusGrid
 
 
@@ -37,6 +39,7 @@ class DevhostDashboard(App):
     INTEGRITY_INTERVAL = 60.0
     LOG_TAIL_INTERVAL = 1.0
     LOG_BUFFER_LINES = 200
+    PORT_SCAN_TTL = 30.0
 
     CSS = """
     Screen {
@@ -46,12 +49,28 @@ class DevhostDashboard(App):
         grid-rows: 1fr 1fr;
     }
 
+    #next-action {
+        dock: bottom;
+        height: 1;
+        padding: 0 1;
+        background: $surface-darken-1;
+        border-top: solid $primary-darken-2;
+        color: $text;
+    }
+
     #sidebar {
         column-span: 1;
         row-span: 2;
         background: $surface;
         border-right: solid $primary;
         padding: 1;
+    }
+
+    #ownership-banner {
+        margin: 0 1 1 1;
+        padding: 0 1;
+        background: $surface-darken-1;
+        border: round $primary-darken-2;
     }
 
     #main-grid {
@@ -118,6 +137,7 @@ class DevhostDashboard(App):
         Binding("ctrl+i", "integrity_check", "Integrity"),
         Binding("ctrl+p", "probe_routes", "Probe"),
         Binding("ctrl+s", "apply_changes", "Apply"),
+        Binding("e", "external_proxy", "External Proxy"),
         Binding("ctrl+x", "emergency_reset", "Emergency Reset"),
         Binding("a", "add_route", "Add Route"),
         Binding("d", "delete_route", "Delete Route"),
@@ -138,6 +158,9 @@ class DevhostDashboard(App):
         self._integrity_results: dict[str, tuple[bool, str]] | None = None
         self._log_buffers: dict[str, deque[str]] = {}
         self._log_offsets: dict[str, int] = {}
+        self._port_scan_cache: list[ListeningPort] = []
+        self._port_scan_ts: float | None = None
+        self._port_scan_inflight = False
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -145,6 +168,7 @@ class DevhostDashboard(App):
         yield Sidebar(id="sidebar")
         yield StatusGrid(id="main-grid")
         yield DetailsPane(id="details")
+        yield Static("", id="next-action")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -163,6 +187,7 @@ class DevhostDashboard(App):
             self._probe_routes_worker()
         if self._background_integrity_enabled:
             self._integrity_worker()
+        self._ensure_port_scan()
 
     def _get_state_mtime(self) -> float | None:
         try:
@@ -199,6 +224,39 @@ class DevhostDashboard(App):
         if not self._log_tail_enabled or not self.selected_route:
             return
         self._log_tail_worker(self.selected_route)
+
+    def _port_scan_is_stale(self) -> bool:
+        if self._port_scan_ts is None:
+            return True
+        return (time.monotonic() - self._port_scan_ts) > self.PORT_SCAN_TTL
+
+    def get_port_scan_results(self) -> tuple[list[ListeningPort], bool]:
+        in_progress = self._port_scan_inflight or self._port_scan_is_stale()
+        return list(self._port_scan_cache), in_progress
+
+    def _ensure_port_scan(self) -> None:
+        if self._port_scan_inflight or not self._port_scan_is_stale():
+            return
+        self._port_scan_inflight = True
+        self._port_scan_worker()
+
+    def _apply_port_scan_results(self, ports: list[ListeningPort]) -> None:
+        self._port_scan_cache = ports
+        self._port_scan_ts = time.monotonic()
+        self._port_scan_inflight = False
+
+        from .modals import AddRouteWizard
+
+        for screen in reversed(self.screen_stack):
+            if isinstance(screen, AddRouteWizard):
+                screen.set_detected_ports(ports)
+                break
+
+    @work(exclusive=True, thread=True)
+    def _port_scan_worker(self) -> list[ListeningPort]:
+        ports = scan_listening_ports()
+        self.call_from_thread(self._apply_port_scan_results, ports)
+        return ports
 
     def _parse_listen_port(self, value: str, default_port: int) -> int:
         if not value:
@@ -458,6 +516,23 @@ class DevhostDashboard(App):
                     self.state,
                 )
 
+        next_action = self._compute_next_action()
+        next_bar = self.query_one("#next-action", Static)
+        next_bar.update(next_action)
+
+    def _compute_next_action(self) -> str:
+        if self.session.has_changes():
+            return "Next: Apply draft changes (Ctrl+S)"
+        if not self.session.routes:
+            return "Next: Add your first route (A)"
+        if self._integrity_results:
+            drift = [path for path, (ok, _) in self._integrity_results.items() if not ok]
+            if drift:
+                return f"Next: Resolve integrity drift ({len(drift)} file(s)) in Integrity tab"
+        if self.session.proxy_mode == "external" and not self.state.external_config_path:
+            return "Next: Attach external proxy config (E)"
+        return "Next: Probe routes (Ctrl+P) or run integrity check (Ctrl+I)"
+
     def action_refresh(self) -> None:
         """Refresh data."""
         self.refresh_data()
@@ -472,6 +547,25 @@ class DevhostDashboard(App):
             self.notify(f"Integrity issues found: {len(issues)} files", severity="warning")
         else:
             self.notify("All files OK", severity="information")
+
+    def resolve_integrity(self, filepath: str, action: str) -> None:
+        """Resolve integrity drift for a tracked file."""
+        path = Path(filepath)
+        if action == "accept":
+            if not path.exists():
+                self.notify("File is missing. Cannot accept.", severity="error")
+                return
+            self.state.record_hash(path)
+            message = "Integrity updated to match current file."
+        elif action == "ignore":
+            self.state.remove_hash(path)
+            message = "Stopped tracking file integrity."
+        else:
+            return
+
+        results = self.state.check_all_integrity()
+        self._apply_integrity_results(results)
+        self.notify(message, severity="information")
 
     def action_probe_routes(self) -> None:
         """Probe all routes."""
@@ -515,11 +609,19 @@ class DevhostDashboard(App):
 
         self.push_screen(ConfirmResetModal())
 
+    def action_external_proxy(self) -> None:
+        """Open external proxy attach/detach flow."""
+        from .modals import ExternalProxyModal
+
+        self.push_screen(ExternalProxyModal())
+
     def action_add_route(self) -> None:
         """Show add route wizard."""
         from .modals import AddRouteWizard
 
-        self.push_screen(AddRouteWizard())
+        self._ensure_port_scan()
+        ports, in_progress = self.get_port_scan_results()
+        self.push_screen(AddRouteWizard(detected_ports=ports, scan_in_progress=in_progress))
 
     def action_delete_route(self) -> None:
         """Delete selected route."""
@@ -551,6 +653,8 @@ class DevhostDashboard(App):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle route selection in the grid."""
+        if event.data_table.id != "routes-table":
+            return
         # Get route name from the selected row
         row_key = event.row_key
         if row_key:

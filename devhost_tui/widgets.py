@@ -10,7 +10,8 @@ Contains the custom widgets for the dashboard:
 """
 
 from textual.app import ComposeResult
-from textual.widgets import DataTable, Label, Markdown, Static, TabbedContent, TabPane, Tree
+from textual.containers import Horizontal
+from textual.widgets import Button, DataTable, Label, Markdown, Static, TabbedContent, TabPane, Tree
 
 from devhost_cli.state import StateConfig
 
@@ -24,6 +25,7 @@ class Sidebar(Static):
 
     def compose(self) -> ComposeResult:
         yield Label("[b]Navigation[/b]", classes="section-title")
+        yield Static("", id="ownership-banner")
         yield Tree("Devhost", id="nav-tree")
 
     def on_mount(self) -> None:
@@ -48,6 +50,19 @@ class Sidebar(Static):
     def update_state(self, state: StateConfig, integrity_results: dict | None = None) -> None:
         """Update sidebar with current state."""
         self._state = state
+        banner = self.query_one("#ownership-banner", Static)
+        mode = state.proxy_mode
+        if mode == "external":
+            owner_text = f"[yellow]External proxy (user-owned)[/yellow] • {state.external_driver}"
+        elif mode == "system":
+            owner_text = "[green]Devhost system proxy (owned)[/green]"
+        elif mode == "gateway":
+            owner_text = "[green]Devhost gateway (owned)[/green]"
+        elif mode == "off":
+            owner_text = "[dim]Proxy off (direct access)[/dim]"
+        else:
+            owner_text = "[dim]Proxy ownership unknown[/dim]"
+        banner.update(owner_text)
 
         # Clear and rebuild apps
         self._apps_node.remove_children()
@@ -58,7 +73,6 @@ class Sidebar(Static):
 
         # Update proxy info
         self._proxy_node.remove_children()
-        mode = state.proxy_mode
         self._proxy_node.add_leaf(f"Mode: {mode}")
         if mode == "gateway":
             self._proxy_node.add_leaf(f"Port: {state.gateway_port}")
@@ -255,23 +269,82 @@ class IntegrityPanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._state: StateConfig | None = None
+        self._results: dict[str, tuple[bool, str]] = {}
+        self._selected_path: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Label("[b]Integrity Status[/b]", classes="section-title")
         yield DataTable(id="integrity-table")
+        with Horizontal(id="integrity-actions"):
+            yield Button("Accept (Overwrite)", id="integrity-accept", variant="success")
+            yield Button("Stop Tracking", id="integrity-ignore", variant="warning")
+            yield Button("Cancel", id="integrity-cancel", variant="default")
+        yield Static("Select a file to resolve drift.", id="integrity-help")
 
     def on_mount(self) -> None:
         """Initialize the integrity table."""
         table = self.query_one(DataTable)
         table.add_column("File", width=50)
         table.add_column("Status", width=15)
+        table.cursor_type = "row"
+        table.zebra_stripes = True
+
+    def _update_help(self, message: str) -> None:
+        help_text = self.query_one("#integrity-help", Static)
+        help_text.update(message)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        row_key = event.row_key
+        self._selected_path = str(row_key.value) if row_key else None
+        if self._selected_path:
+            self._update_help(f"Selected: {self._selected_path}")
+        else:
+            self._update_help("Select a file to resolve drift.")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "integrity-accept":
+            self._resolve_selected("accept")
+        elif event.button.id == "integrity-ignore":
+            self._resolve_selected("ignore")
+        elif event.button.id == "integrity-cancel":
+            self._selected_path = None
+            self._update_help("Resolution cancelled.")
+
+    def _resolve_selected(self, action: str) -> None:
+        if not self._selected_path:
+            if hasattr(self.app, "notify"):
+                self.app.notify("Select a file to resolve first.", severity="warning")
+            return
+        if not self._state:
+            if hasattr(self.app, "notify"):
+                self.app.notify("Integrity state unavailable.", severity="error")
+            return
+        resolver = getattr(self.app, "resolve_integrity", None)
+        if not callable(resolver):
+            if hasattr(self.app, "notify"):
+                self.app.notify("Integrity resolution not supported.", severity="error")
+            return
+        resolver(self._selected_path, action)
+        self._selected_path = None
 
     def update_integrity(self, state: StateConfig, results: dict | None = None) -> None:
         """Update integrity status."""
+        self._state = state
         table = self.query_one(DataTable)
         table.clear()
 
         results = results if results is not None else state.check_all_integrity()
+        self._results = results
+        self._selected_path = None
+        if not results:
+            self._update_help("No tracked files for integrity.")
+        else:
+            issues = [path for path, (ok, _) in results.items() if not ok]
+            if issues:
+                self._update_help("Select a drifted file to resolve.")
+            else:
+                self._update_help("No integrity issues detected.")
         for filepath, (ok, status) in results.items():
             # Shorten the path for display
             short_path = filepath.replace(str(state.devhost_dir), "~/.devhost")
@@ -279,7 +352,7 @@ class IntegrityPanel(Static):
                 status_display = f"[green]{status}[/]"
             else:
                 status_display = f"[red]{status}[/]"
-            table.add_row(short_path, status_display)
+            table.add_row(short_path, status_display, key=filepath)
 
 
 class DetailsPane(Static):
@@ -301,6 +374,8 @@ class DetailsPane(Static):
                 yield Static("Log tailing coming soon...", id="logs-content")
             with TabPane("Config", id="tab-config"):
                 yield Markdown("", id="config-content")
+                with Horizontal(id="config-actions"):
+                    yield Button("External Proxy...", id="external-proxy")
             with TabPane("Integrity", id="tab-integrity"):
                 yield IntegrityPanel(id="integrity-panel")
 
@@ -372,6 +447,18 @@ class DetailsPane(Static):
         config = self.query_one("#config-content", Markdown)
         domain = route.get("domain", state.system_domain)
         enabled = route.get("enabled", True)
+        external_config = getattr(state, "external_config_path", None)
+        external_driver = getattr(state, "external_driver", "caddy")
+        external_path = str(external_config) if external_config else "Not set"
+        snippet_driver = "caddy" if state.proxy_mode != "external" else external_driver
+        snippet_label = snippet_driver.capitalize()
+        snippet_content = ""
+        try:
+            from devhost_cli.proxy import generate_snippet
+
+            snippet_content = generate_snippet(snippet_driver, {name: route}, domain)
+        except Exception:
+            snippet_content = f"# Unable to generate {snippet_driver} snippet"
         config_text = f"""
 ## Route Configuration
 
@@ -380,11 +467,13 @@ class DetailsPane(Static):
 **Domain:** `{domain}`
 **Enabled:** `{enabled}`
 
-### Generated Caddy Snippet
-```caddy
-{name}.{domain} {{
-    reverse_proxy http://{upstream}
-}}
+### External Proxy
+**Driver:** `{external_driver}`
+**Config Path:** `{external_path}`
+
+### Generated {snippet_label} Snippet
+```
+{snippet_content}
 ```
 """
         config.update(config_text)
@@ -392,3 +481,8 @@ class DetailsPane(Static):
         # Update integrity panel
         integrity = self.query_one(IntegrityPanel)
         integrity.update_integrity(integrity_state or state, integrity_results)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "external-proxy":
+            if hasattr(self.app, "action_external_proxy"):
+                self.app.action_external_proxy()

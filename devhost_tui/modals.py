@@ -4,9 +4,12 @@ Devhost TUI - Modal Dialogs
 Contains modal screens for:
 - AddRouteWizard: Multi-step wizard to add a new route
 - ConfirmResetModal: Emergency reset confirmation
+- ExternalProxyModal: Attach/detach external proxy configs
 """
 
 from textual.app import ComposeResult
+from pathlib import Path
+
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
@@ -14,7 +17,196 @@ from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
 from devhost_cli.state import StateConfig
 from devhost_cli.validation import parse_target, validate_name
 
-from .scanner import ListeningPort, detect_framework, scan_listening_ports
+from .scanner import ListeningPort, format_port_list
+
+
+class ExternalProxyModal(ModalScreen[bool]):
+    """Attach/detach devhost snippets to an external proxy config."""
+
+    CSS = """
+    ExternalProxyModal {
+        align: center middle;
+    }
+
+    #external-dialog {
+        width: 90;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 2;
+    }
+
+    #external-dialog Label {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #discover-results {
+        height: auto;
+        max-height: 8;
+        margin: 1 0;
+        padding: 1;
+        background: $surface-darken-1;
+        border: round $primary-darken-2;
+    }
+
+    #external-buttons {
+        margin-top: 2;
+        width: 100%;
+        align: right middle;
+    }
+
+    #external-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="external-dialog"):
+            yield Label("[b]External Proxy Attach/Detach[/b]")
+            yield Label("[yellow]Edits user-owned proxy configs. Backups are created before changes.[/yellow]")
+            yield Label("Select proxy driver:")
+            yield RadioSet(
+                RadioButton("Caddy", id="driver-caddy"),
+                RadioButton("Nginx", id="driver-nginx"),
+                RadioButton("Traefik", id="driver-traefik"),
+                id="driver-select",
+            )
+            yield Label("Config Path (optional):")
+            yield Input(placeholder="e.g., /etc/nginx/nginx.conf", id="config-path")
+            yield Static("Discover a config file to prefill the path.", id="discover-results")
+            with Horizontal(id="external-buttons"):
+                yield Button("Discover", variant="default", id="discover")
+                yield Button("Export Snippet", variant="primary", id="export")
+                yield Button("Attach", variant="success", id="attach")
+                yield Button("Detach", variant="warning", id="detach")
+                yield Button("Close", variant="default", id="close")
+
+    def on_mount(self) -> None:
+        state = getattr(self.app, "state", None) or StateConfig()
+        driver = getattr(state, "external_driver", "caddy")
+        self._set_selected_driver(driver)
+        config_input = self.query_one("#config-path", Input)
+        if state.external_config_path:
+            config_input.value = str(state.external_config_path)
+        self._update_discover_text("Discover a config file to prefill the path.")
+
+    def _set_selected_driver(self, driver: str) -> None:
+        driver_select = self.query_one("#driver-select", RadioSet)
+        mapping = {
+            "caddy": "driver-caddy",
+            "nginx": "driver-nginx",
+            "traefik": "driver-traefik",
+        }
+        target = mapping.get(driver, "driver-caddy")
+        for button in driver_select.query(RadioButton):
+            button.value = button.id == target
+
+    def _selected_driver(self) -> str:
+        driver_select = self.query_one("#driver-select", RadioSet)
+        button = driver_select.pressed_button
+        if not button:
+            for candidate in driver_select.query(RadioButton):
+                if candidate.value:
+                    button = candidate
+                    break
+        if not button:
+            return "caddy"
+        button_id = button.id
+        return {
+            "driver-caddy": "caddy",
+            "driver-nginx": "nginx",
+            "driver-traefik": "traefik",
+        }.get(button_id, "caddy")
+
+    def _get_config_path(self) -> Path | None:
+        config_input = self.query_one("#config-path", Input)
+        value = config_input.value.strip()
+        if value:
+            return Path(value)
+        state = getattr(self.app, "state", None) or StateConfig()
+        return state.external_config_path
+
+    def _update_discover_text(self, message: str) -> None:
+        discover = self.query_one("#discover-results", Static)
+        discover.update(message)
+
+    def _guard_pending_changes(self) -> bool:
+        session = getattr(self.app, "session", None)
+        if session and session.has_changes():
+            self.app.notify("Apply draft changes before modifying external proxy.", severity="warning")
+            return False
+        return True
+
+    def _refresh_state(self) -> None:
+        if hasattr(self.app, "refresh_data"):
+            self.app.refresh_data()
+        if hasattr(self.app, "action_integrity_check"):
+            self.app.action_integrity_check()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        from devhost_cli.proxy import attach_to_config, detach_from_config, discover_proxy_config, export_snippets
+
+        if event.button.id == "close":
+            self.dismiss(False)
+            return
+
+        driver = self._selected_driver()
+
+        if event.button.id == "discover":
+            results = discover_proxy_config(driver)
+            if not results:
+                self._update_discover_text("No configs discovered. Enter a path manually.")
+                return
+            lines = ["Discovered configs:"]
+            for drv, path in results:
+                lines.append(f"  {drv}: {path}")
+            self._update_discover_text("\n".join(lines))
+            if len(results) == 1:
+                _, path = results[0]
+                config_input = self.query_one("#config-path", Input)
+                config_input.value = str(path)
+            return
+
+        if event.button.id == "export":
+            state = getattr(self.app, "state", None) or StateConfig()
+            exported = export_snippets(state, [driver])
+            snippet_path = exported.get(driver)
+            if snippet_path:
+                self.app.notify(f"Snippet exported: {snippet_path}", severity="information")
+            self._refresh_state()
+            return
+
+        if event.button.id == "attach":
+            if not self._guard_pending_changes():
+                return
+            config_path = self._get_config_path()
+            if not config_path:
+                self.app.notify("Config path required for attach.", severity="error")
+                return
+            state = getattr(self.app, "state", None) or StateConfig()
+            success, msg = attach_to_config(state, config_path, driver)
+            self.app.notify(msg, severity="information" if success else "error")
+            if success:
+                self._refresh_state()
+            return
+
+        if event.button.id == "detach":
+            if not self._guard_pending_changes():
+                return
+            config_path = self._get_config_path()
+            if not config_path:
+                self.app.notify("Config path required for detach.", severity="error")
+                return
+            state = getattr(self.app, "state", None) or StateConfig()
+            success, msg = detach_from_config(state, config_path)
+            self.app.notify(msg, severity="information" if success else "error")
+            if success:
+                self._refresh_state()
+            return
 
 
 class ConfirmResetModal(ModalScreen[bool]):
@@ -147,13 +339,14 @@ class AddRouteWizard(ModalScreen[bool]):
     }
     """
 
-    def __init__(self):
+    def __init__(self, detected_ports: list[ListeningPort] | None = None, scan_in_progress: bool = False):
         super().__init__()
         self.step = 0
         self.route_name = ""
         self.route_upstream = ""
         self.route_mode = "gateway"
-        self.detected_ports: list[ListeningPort] = []
+        self.detected_ports: list[ListeningPort] = detected_ports or []
+        self._scan_in_progress = scan_in_progress
 
     def compose(self) -> ComposeResult:
         with Vertical(id="wizard-dialog"):
@@ -165,24 +358,35 @@ class AddRouteWizard(ModalScreen[bool]):
 
     def on_mount(self) -> None:
         """Scan for ports and show first step."""
-        self.detected_ports = scan_listening_ports()
+        if hasattr(self.app, "get_port_scan_results"):
+            ports, in_progress = self.app.get_port_scan_results()
+            self.detected_ports = ports
+            self._scan_in_progress = in_progress
         self._show_step_1()
+
+    def _port_list_text(self) -> str:
+        if self._scan_in_progress and not self.detected_ports:
+            return "Scanning for listening ports..."
+        if not self.detected_ports:
+            return "No listening ports found."
+        return "Detected listening ports:\n" + format_port_list(self.detected_ports[:8])
+
+    def set_detected_ports(self, ports: list[ListeningPort]) -> None:
+        self.detected_ports = ports
+        self._scan_in_progress = False
+        if self.is_mounted and self.step == 0:
+            try:
+                port_list = self.query_one("#port-list", Static)
+                port_list.update(self._port_list_text())
+            except Exception:
+                return
 
     def _show_step_1(self) -> None:
         """Show step 1: Identity & Target."""
         content = self.query_one("#wizard-content")
         content.remove_children()
 
-        # Detected ports section
-        if self.detected_ports:
-            port_text = "Detected listening ports:\n"
-            for p in self.detected_ports[:8]:  # Limit to 8
-                framework = detect_framework(p.name, p.port)
-                if framework:
-                    port_text += f"  {p.port}  {p.name}  [{framework}]\n"
-                else:
-                    port_text += f"  {p.port}  {p.name}\n"
-            content.mount(Static(port_text, id="port-list"))
+        content.mount(Static(self._port_list_text(), id="port-list"))
 
         # Route name input
         content.mount(Label("Route Name (subdomain):", classes="field-label"))

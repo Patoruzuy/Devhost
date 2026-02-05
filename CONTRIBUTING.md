@@ -2,6 +2,34 @@
 
 Thank you for your interest in contributing to Devhost! This document provides guidelines and instructions for contributing.
 
+## Development Setup (Recommended)
+
+Use a virtual environment and always run tools via `python -m ...` to avoid “installed but not found” issues (for example: `No module named pytest`).
+
+### Windows (PowerShell)
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip setuptools wheel
+python -m pip install -e ".[dev,all]"
+```
+
+### macOS / Linux
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip setuptools wheel
+python -m pip install -e ".[dev,all]"
+```
+
+### Common Install Gotchas
+
+- If `pytest` (or any tool) can’t be imported after install, you’re likely using the wrong interpreter. Prefer `python -m pytest` and check `python -m pip -V`.
+- Don’t use `pip install --user` inside a virtualenv (user site-packages are typically hidden).
+- Avoid `--no-build-isolation` unless you know you need it; if you use it, ensure `setuptools` is installed in the active environment.
+
 ## Before Submitting a Pull Request
 
 ### 1. Run Linting
@@ -192,7 +220,7 @@ git commit -m "wip"
 1. **Fork and clone the repository:**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/devhost.git
+git clone https://github.com/Patoruzuy/devhost.git
 cd devhost
 ```
 

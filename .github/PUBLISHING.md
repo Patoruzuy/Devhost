@@ -13,7 +13,8 @@ This guide explains how to publish Devhost to PyPI using GitHub Actions.
 1. Go to https://test.pypi.org/manage/account/publishing/
 2. Add a new pending publisher:
    - **PyPI Project Name**: `devhost`
-   - **Owner**: `yourusername` (your GitHub username/org)
+   - **Owner**: `Sebastian Gomez`
+   - **Repository URL**: `https://github.com/Patoruzuy/devhost`
    - **Repository name**: `Devhost`
    - **Workflow name**: `publish.yml`
    - **Environment name**: `testpypi`
