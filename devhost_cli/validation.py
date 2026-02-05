@@ -1,9 +1,15 @@
 """Target validation and parsing utilities"""
 
+import logging
 import re
 from urllib.parse import urlparse
 
 from .utils import msg_error, msg_info, msg_warning
+
+logger = logging.getLogger("devhost.validation")
+
+# Security: Only allow http/https schemes
+ALLOWED_SCHEMES = {"http", "https"}
 
 
 def validate_name(name: str) -> bool:
@@ -63,9 +69,16 @@ def parse_target(value: str) -> tuple[str, str, int] | None:
         return ("http", "127.0.0.1", port)
 
     # Full URL
-    if value.startswith("http://") or value.startswith("https://"):
+    if "://" in value:
         try:
             parsed = urlparse(value)
+            
+            # Security: Validate scheme
+            if parsed.scheme not in ALLOWED_SCHEMES:
+                logger.warning("Rejected disallowed scheme: %s", parsed.scheme)
+                msg_error(f"Invalid scheme '{parsed.scheme}': only http/https allowed")
+                return None
+            
             if not parsed.hostname or not parsed.port:
                 msg_error("Invalid URL: must include host and port")
                 return None

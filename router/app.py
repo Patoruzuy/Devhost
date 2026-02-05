@@ -22,6 +22,14 @@ try:
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
 
+# Security imports
+try:
+    from devhost_cli.router.security import validate_upstream_target
+except ImportError:
+    # Fallback if security module not available
+    def validate_upstream_target(host: str, port: int) -> tuple[bool, str | None]:
+        return (True, None)
+
 # Global client
 http_client: httpx.AsyncClient | None = None
 
@@ -568,6 +576,26 @@ async def wildcard_proxy(request: Request, full_path: str):
 
     # Build upstream URL
     target_scheme, target_host, target_port = target
+    
+    # Security: SSRF protection - validate upstream target
+    valid, error_msg = validate_upstream_target(target_host, target_port)
+    if not valid:
+        logger.error("[%s] SSRF protection blocked request to %s:%d - %s", request_id, target_host, target_port, error_msg)
+        METRICS.record(subdomain, 403)
+        
+        # Provide migration hint for legitimate local development
+        hint = None
+        if "private IP" in (error_msg or ""):
+            hint = "This appears to be a local development app. Set DEVHOST_ALLOW_PRIVATE_NETWORKS=1 to enable."
+        
+        return error_response(
+            request,
+            403,
+            f"Security policy blocked this request: {error_msg}",
+            request_id,
+            hint=hint,
+        )
+    
     url = f"{target_scheme}://{target_host}:{target_port}/{full_path}"
     if request.url.query:
         url = f"{url}?{request.url.query}"
@@ -580,8 +608,14 @@ async def wildcard_proxy(request: Request, full_path: str):
     client_ip = request.client.host if request.client else "127.0.0.1"
     headers["X-Forwarded-For"] = headers.get("x-forwarded-for", client_ip)
     headers["X-Forwarded-Host"] = original_host
-    if "x-forwarded-proto" not in headers:
-        headers["X-Forwarded-Proto"] = request.url.scheme or "http"
+    existing_proto = headers.get("x-forwarded-proto") or headers.get("X-Forwarded-Proto")
+    forwarded_proto = request.url.scheme or "http"
+    # Only trust X-Forwarded-Proto from a local, trusted proxy
+    if client_ip in {"127.0.0.1", "::1"} and existing_proto:
+        forwarded_proto = existing_proto.split(",")[0].strip().lower() or forwarded_proto
+    headers.pop("x-forwarded-proto", None)
+    headers.pop("X-Forwarded-Proto", None)
+    headers["X-Forwarded-Proto"] = forwarded_proto
     headers["X-Real-IP"] = client_ip
 
     # Use globally shared client
