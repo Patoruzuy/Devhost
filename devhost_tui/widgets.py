@@ -45,7 +45,7 @@ class Sidebar(Static):
         self._system_node.add_leaf("Diagnostics")
         self._system_node.add_leaf("Settings")
 
-    def update_state(self, state: StateConfig) -> None:
+    def update_state(self, state: StateConfig, integrity_results: dict | None = None) -> None:
         """Update sidebar with current state."""
         self._state = state
 
@@ -69,12 +69,18 @@ class Sidebar(Static):
 
         # Update integrity
         self._integrity_node.remove_children()
-        results = state.check_all_integrity()
-        issues = sum(1 for _, (ok, _) in results.items() if not ok)
-        if issues:
-            self._integrity_node.add_leaf(f"⚠ {issues} issues")
+        results = integrity_results
+        if results is None and hasattr(state, "check_all_integrity"):
+            results = state.check_all_integrity()
+
+        if results is None:
+            self._integrity_node.add_leaf("…")
         else:
-            self._integrity_node.add_leaf("✓ All OK")
+            issues = sum(1 for _, (ok, _) in results.items() if not ok)
+            if issues:
+                self._integrity_node.add_leaf(f"⚠ {issues} issues")
+            else:
+                self._integrity_node.add_leaf("✓ All OK")
 
 
 class StatusGrid(Static):
@@ -103,9 +109,18 @@ class StatusGrid(Static):
         table.add_column("Mode", key="mode", width=10)
         table.add_column("URL", key="url", width=30)
         table.add_column("Upstream", key="upstream", width=20)
+        table.add_column("Latency", key="latency", width=10)
         table.add_column("Integrity", key="integrity", width=10)
 
-    def update_routes(self, routes: dict, mode: str, domain: str, gateway_port: int) -> None:
+    def update_routes(
+        self,
+        routes: dict,
+        mode: str,
+        domain: str,
+        gateway_port: int,
+        probe_results: dict | None = None,
+        integrity_ok: bool | None = None,
+    ) -> None:
         """Update the routes table."""
         self._routes = routes
         self._mode = mode
@@ -128,14 +143,31 @@ class StatusGrid(Static):
             else:
                 url = f"http://{name}.{route_domain}"
 
-            # Status indicator
+            # Status indicator (use probe info when available)
             status = "[green]●[/]" if enabled else "[dim]○[/]"
+            latency_display = "-"
+            if enabled and probe_results:
+                result = probe_results.get(name)
+                if result:
+                    route_ok = result.get("route_ok")
+                    upstream_ok = result.get("upstream_ok")
+                    latency = result.get("latency_ms")
+                    if latency is not None:
+                        latency_display = f"{latency:.0f}ms"
+                    if route_ok is False or upstream_ok is False:
+                        status = "[red]●[/]"
+                    elif route_ok is True:
+                        status = "[green]●[/]"
+                    else:
+                        status = "[yellow]●[/]"
 
             # Mode badge
             mode_badge = f"[{mode}]"
 
-            # Integrity (simplified)
-            integrity = "[green]OK[/]"
+            if integrity_ok is None:
+                integrity = "[dim]...[/]"
+            else:
+                integrity = "[green]OK[/]" if integrity_ok else "[yellow]DRIFT[/]"
 
             table.add_row(
                 status,
@@ -143,6 +175,7 @@ class StatusGrid(Static):
                 mode_badge,
                 url,
                 upstream,
+                latency_display,
                 integrity,
                 key=name,
             )
@@ -233,12 +266,12 @@ class IntegrityPanel(Static):
         table.add_column("File", width=50)
         table.add_column("Status", width=15)
 
-    def update_integrity(self, state: StateConfig) -> None:
+    def update_integrity(self, state: StateConfig, results: dict | None = None) -> None:
         """Update integrity status."""
         table = self.query_one(DataTable)
         table.clear()
 
-        results = state.check_all_integrity()
+        results = results if results is not None else state.check_all_integrity()
         for filepath, (ok, status) in results.items():
             # Shorten the path for display
             short_path = filepath.replace(str(state.devhost_dir), "~/.devhost")
@@ -271,7 +304,15 @@ class DetailsPane(Static):
             with TabPane("Integrity", id="tab-integrity"):
                 yield IntegrityPanel(id="integrity-panel")
 
-    def show_route(self, name: str, route: dict, state: StateConfig) -> None:
+    def show_route(
+        self,
+        name: str,
+        route: dict,
+        state: StateConfig,
+        probe_results: dict | None = None,
+        integrity_results: dict | None = None,
+        integrity_state: StateConfig | None = None,
+    ) -> None:
         """Show details for a specific route."""
         self._current_route = name
         self._current_route_data = route
@@ -284,7 +325,48 @@ class DetailsPane(Static):
         # Update verify tab
         verify = self.query_one("#verify-content", Static)
         upstream = route.get("upstream", "unknown")
-        verify.update(f"Route: {name}\nUpstream: {upstream}\n\nPress Ctrl+P to probe")
+        probe = probe_results.get(name) if probe_results else None
+        if probe:
+            route_ok = probe.get("route_ok")
+            upstream_ok = probe.get("upstream_ok")
+            latency = probe.get("latency_ms")
+            last_checked = probe.get("checked_at")
+            route_error = probe.get("route_error")
+            upstream_error = probe.get("upstream_error")
+            route_scheme = probe.get("route_scheme")
+            route_port = probe.get("route_port")
+            latency_text = f"{latency:.0f}ms" if latency is not None else "-"
+            status_line = "OK" if route_ok else "FAIL" if route_ok is False else "UNKNOWN"
+            upstream_line = "OK" if upstream_ok else "FAIL" if upstream_ok is False else "UNKNOWN"
+            lines = [
+                f"Route: {name}",
+                f"Upstream: {upstream}",
+                f"Upstream TCP: {upstream_line}",
+                f"Route Probe: {status_line}",
+            ]
+            if route_scheme and route_port:
+                lines.append(f"Probe Target: {route_scheme}://127.0.0.1:{route_port}")
+            lines.extend(
+                [
+                    f"Latency: {latency_text}",
+                    f"Last Checked: {last_checked or '-'}",
+                ]
+            )
+            if upstream_error:
+                lines.append(f"Upstream Error: {upstream_error}")
+            if route_error:
+                lines.append(f"Route Error: {route_error}")
+            if integrity_results:
+                drift = [path for path, (ok, _) in integrity_results.items() if not ok]
+                if drift:
+                    lines.append(f"Integrity: DRIFT ({len(drift)} files)")
+                    for path in drift[:3]:
+                        lines.append(f"  - {path}")
+                else:
+                    lines.append("Integrity: OK")
+            verify.update("\n".join(lines))
+        else:
+            verify.update(f"Route: {name}\\nUpstream: {upstream}\\n\\nPress Ctrl+P to probe")
 
         # Update config tab
         config = self.query_one("#config-content", Markdown)
@@ -309,4 +391,4 @@ class DetailsPane(Static):
 
         # Update integrity panel
         integrity = self.query_one(IntegrityPanel)
-        integrity.update_integrity(state)
+        integrity.update_integrity(integrity_state or state, integrity_results)

@@ -72,13 +72,13 @@ def parse_target(value: str) -> tuple[str, str, int] | None:
     if "://" in value:
         try:
             parsed = urlparse(value)
-            
+
             # Security: Validate scheme
             if parsed.scheme not in ALLOWED_SCHEMES:
                 logger.warning("Rejected disallowed scheme: %s", parsed.scheme)
                 msg_error(f"Invalid scheme '{parsed.scheme}': only http/https allowed")
                 return None
-            
+
             if not parsed.hostname or not parsed.port:
                 msg_error("Invalid URL: must include host and port")
                 return None

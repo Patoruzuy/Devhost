@@ -1,12 +1,15 @@
 """Tests for TUI flows (wizard + delete)."""
 
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 try:
     from devhost_tui.app import DevhostDashboard
     from devhost_tui.modals import AddRouteWizard
+    from devhost_tui.widgets import DetailsPane, IntegrityPanel
 except Exception as exc:  # pragma: no cover - optional dependency
     raise unittest.SkipTest("textual is not available") from exc
 
@@ -46,10 +49,21 @@ class FakeState:
         self.set_external_driver = driver
 
 
+class FakeSession(FakeState):
+    def __init__(self, proxy_mode: str = "gateway", external_driver: str = "nginx"):
+        super().__init__(proxy_mode=proxy_mode, external_driver=external_driver)
+
+    def has_changes(self):
+        return True
+
+    def reset(self):
+        return None
+
+
 class WizardHarness(AddRouteWizard):
     def __init__(self):
         super().__init__()
-        self._app = SimpleNamespace(notify=Mock(), refresh_data=Mock())
+        self._app = SimpleNamespace(notify=Mock(), refresh_data=Mock(), queue_route_change=Mock())
         self._query = {}
 
     @property
@@ -100,61 +114,164 @@ class WizardTests(unittest.TestCase):
         wizard.route_name = "api"
         wizard.route_upstream = "127.0.0.1:8000"
         wizard.route_mode = "system"
-        fake_state = FakeState()
-
-        with patch("devhost_tui.modals.StateConfig", return_value=fake_state):
-            with patch("devhost_cli.caddy_lifecycle.write_system_caddyfile") as write_caddy:
-                wizard._apply_route()
-
-        self.assertEqual(fake_state.proxy_mode, "system")
-        write_caddy.assert_called_once_with(fake_state)
+        wizard._apply_route()
+        wizard.app.queue_route_change.assert_called_once_with("api", "127.0.0.1:8000", "system")
 
     def test_wizard_apply_external_mode(self):
         wizard = WizardHarness()
         wizard.route_name = "api"
         wizard.route_upstream = "127.0.0.1:8000"
         wizard.route_mode = "external"
-        fake_state = FakeState(proxy_mode="gateway", external_driver="nginx")
-
-        with patch("devhost_tui.modals.StateConfig", return_value=fake_state):
-            with patch("devhost_cli.proxy.export_snippets") as export_snippets:
-                wizard._apply_route()
-
-        self.assertEqual(fake_state.proxy_mode, "external")
-        self.assertEqual(fake_state.set_external_driver, "nginx")
-        export_snippets.assert_called_once_with(fake_state, ["nginx"])
+        wizard._apply_route()
+        wizard.app.queue_route_change.assert_called_once_with("api", "127.0.0.1:8000", "external")
 
 
 class DashboardDeleteTests(unittest.TestCase):
     def test_delete_route_regenerates_system_config(self):
         fake_state = FakeState(proxy_mode="system")
+        fake_session = FakeSession(proxy_mode="system")
         fake_self = SimpleNamespace(
             selected_route="api",
             state=fake_state,
+            session=fake_session,
+            _probe_results={},
+            _log_buffers={},
             notify=Mock(),
             refresh_data=Mock(),
         )
-
-        with patch("devhost_cli.caddy_lifecycle.write_system_caddyfile") as write_caddy:
-            DevhostDashboard.action_delete_route(fake_self)
-
-        self.assertEqual(fake_state.removed, "api")
-        write_caddy.assert_called_once_with(fake_state)
+        DevhostDashboard.action_delete_route(fake_self)
+        self.assertEqual(fake_session.removed, "api")
 
     def test_delete_route_regenerates_external_snippet(self):
         fake_state = FakeState(proxy_mode="external", external_driver="nginx")
+        fake_session = FakeSession(proxy_mode="external", external_driver="nginx")
         fake_self = SimpleNamespace(
             selected_route="api",
             state=fake_state,
+            session=fake_session,
+            _probe_results={},
+            _log_buffers={},
             notify=Mock(),
             refresh_data=Mock(),
         )
+        DevhostDashboard.action_delete_route(fake_self)
+        self.assertEqual(fake_session.removed, "api")
 
-        with patch("devhost_cli.proxy.export_snippets") as export_snippets:
-            DevhostDashboard.action_delete_route(fake_self)
 
-        self.assertEqual(fake_state.removed, "api")
-        export_snippets.assert_called_once_with(fake_state, ["nginx"])
+class ProbeTargetTests(unittest.TestCase):
+    def test_probe_targets_gateway(self):
+        targets = DevhostDashboard._compute_probe_targets("gateway", 7777, "127.0.0.1:80", "127.0.0.1:443")
+        self.assertEqual(targets, [("http", 7777)])
+
+    def test_probe_targets_system_https_first(self):
+        targets = DevhostDashboard._compute_probe_targets("system", 7777, "127.0.0.1:80", "127.0.0.1:443")
+        self.assertEqual(targets, [("https", 443), ("http", 80)])
+
+    def test_probe_targets_single_port(self):
+        targets = DevhostDashboard._compute_probe_targets("system", 7777, "127.0.0.1:8080", "127.0.0.1:8080")
+        self.assertEqual(targets, [("https", 8080)])
+
+
+class LogPathTests(unittest.TestCase):
+    def test_log_path_prefers_route_setting(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        tmp.close()
+        try:
+            fake_state = FakeState()
+            fake_session = FakeSession()
+            fake_session.get_route = Mock(return_value={"log_path": tmp.name})
+            fake_self = SimpleNamespace(state=fake_state, session=fake_session)
+            path = DevhostDashboard._resolve_log_path(fake_self, "api")
+            self.assertEqual(str(path), tmp.name)
+        finally:
+            Path(tmp.name).unlink(missing_ok=True)
+
+    def test_log_path_fallbacks(self):
+        fake_state = FakeState()
+        fake_session = FakeSession()
+        fake_session.get_route = Mock(return_value={})
+        fake_state.devhost_dir = Path(tempfile.mkdtemp())
+        logs_dir = fake_state.devhost_dir / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_file = logs_dir / "devhost-router.log"
+        log_file.write_text("hello", encoding="utf-8")
+        fake_self = SimpleNamespace(state=fake_state, session=fake_session)
+        path = DevhostDashboard._resolve_log_path(fake_self, "api")
+        self.assertEqual(path, log_file)
+
+
+class IntegritySummaryTests(unittest.TestCase):
+    def test_integrity_summary_in_verify(self):
+        # Build a minimal DetailsPane with a stub verify widget
+        class StubVerify:
+            def __init__(self):
+                self.text = ""
+
+            def update(self, text):
+                self.text = text
+
+        class StubDetails(DetailsPane):
+            def __init__(self):
+                super().__init__()
+                self._verify = StubVerify()
+
+            def query_one(self, selector, expect_type=None):  # type: ignore[override]
+                if selector == "#verify-content":
+                    return self._verify
+                if selector == "#flow-content" or selector == "#config-content":
+                    return SimpleNamespace(update=lambda *_args, **_kwargs: None)
+                if selector == IntegrityPanel:
+                    return SimpleNamespace(update_integrity=lambda *_args, **_kwargs: None)
+                return SimpleNamespace(update=lambda *_args, **_kwargs: None)
+
+        details = StubDetails()
+        route = {"upstream": "127.0.0.1:8000", "domain": "localhost", "enabled": True}
+        state = FakeState()
+        probe_results = {"api": {"route_ok": True, "upstream_ok": True, "latency_ms": 1, "checked_at": "now"}}
+        integrity_results = {"file": (False, "modified")}
+        details.show_route("api", route, state, probe_results, integrity_results)
+        self.assertIn("Integrity: DRIFT", details._verify.text)
+
+
+class ProbeErrorTests(unittest.TestCase):
+    def test_probe_error_shows_in_verify(self):
+        class StubVerify:
+            def __init__(self):
+                self.text = ""
+
+            def update(self, text):
+                self.text = text
+
+        class StubDetails(DetailsPane):
+            def __init__(self):
+                super().__init__()
+                self._verify = StubVerify()
+
+            def query_one(self, selector, expect_type=None):  # type: ignore[override]
+                if selector == "#verify-content":
+                    return self._verify
+                if selector == "#flow-content" or selector == "#config-content":
+                    return SimpleNamespace(update=lambda *_args, **_kwargs: None)
+                if selector == IntegrityPanel:
+                    return SimpleNamespace(update_integrity=lambda *_args, **_kwargs: None)
+                return SimpleNamespace(update=lambda *_args, **_kwargs: None)
+
+        details = StubDetails()
+        route = {"upstream": "127.0.0.1:8000", "domain": "localhost", "enabled": True}
+        state = FakeState()
+        probe_results = {
+            "api": {
+                "route_ok": False,
+                "upstream_ok": False,
+                "latency_ms": 1,
+                "checked_at": "now",
+                "route_error": "HTTP 502",
+                "upstream_error": "TCP connect failed",
+            }
+        }
+        details.show_route("api", route, state, probe_results, {})
+        self.assertIn("Route Error: HTTP 502", details._verify.text)
+        self.assertIn("Upstream Error: TCP connect failed", details._verify.text)
 
 
 if __name__ == "__main__":

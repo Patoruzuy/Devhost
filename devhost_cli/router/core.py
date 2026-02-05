@@ -18,6 +18,15 @@ from devhost_cli.router.cache import RouteCache
 from devhost_cli.router.metrics import Metrics
 from devhost_cli.router.utils import extract_subdomain, load_domain, parse_target
 
+# Optional SSRF protection (security module is available in v3; keep router usable if missing)
+try:
+    from devhost_cli.router.security import validate_upstream_target
+except Exception:  # pragma: no cover
+
+    def validate_upstream_target(host: str, port: int) -> tuple[bool, str | None]:
+        return (True, None)
+
+
 # Optional WebSocket client support (for WebSocket proxying)
 try:
     import websockets
@@ -202,13 +211,30 @@ def create_app() -> FastAPI:
             await websocket.close(code=1008, reason=f"No route found for {subdomain}.{base_domain}")
             return
 
+        request_id = str(uuid.uuid4())[:8]
         target_scheme, target_host, target_port = target
+
+        # Security: SSRF protection - validate upstream target (before accepting the handshake)
+        valid, error_msg = validate_upstream_target(target_host, target_port)
+        if not valid:
+            logger.error(
+                "[%s] SSRF protection blocked WebSocket to %s:%d - %s",
+                request_id,
+                target_host,
+                target_port,
+                error_msg,
+            )
+            try:
+                await websocket.close(code=1008, reason="Security policy blocked this upstream (SSRF protection)")
+            except Exception:
+                pass
+            return
+
         ws_scheme = "wss" if target_scheme == "https" else "ws"
         upstream_url = f"{ws_scheme}://{target_host}:{target_port}/{full_path}"
         if websocket.url.query:
             upstream_url = f"{upstream_url}?{websocket.url.query}"
 
-        request_id = str(uuid.uuid4())[:8]
         logger.info("[%s] WebSocket connection: %s.%s -> %s", request_id, subdomain, base_domain, upstream_url)
 
         await websocket.accept()
@@ -314,6 +340,22 @@ def create_app() -> FastAPI:
                 {"error": f"No route found for {subdomain}.{base_domain}", "request_id": request_id}, status_code=404
             )
         target_scheme, target_host, target_port = target
+
+        # Security: SSRF protection - validate upstream target
+        valid, error_msg = validate_upstream_target(target_host, target_port)
+        if not valid:
+            request_id = str(uuid.uuid4())[:8]
+            logger.error(
+                "[%s] SSRF protection blocked request to %s:%d - %s",
+                request_id,
+                target_host,
+                target_port,
+                error_msg,
+            )
+            return JSONResponse(
+                {"error": f"Security policy blocked this request: {error_msg}", "request_id": request_id},
+                status_code=403,
+            )
 
         # build upstream URL and preserve query string
         url = f"{target_scheme}://{target_host}:{target_port}{request.url.path}"

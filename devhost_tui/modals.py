@@ -75,7 +75,7 @@ class ConfirmResetModal(ModalScreen[bool]):
         """Perform the emergency reset."""
         from devhost_cli.caddy_lifecycle import stop_caddy
 
-        state = StateConfig()
+        state = getattr(self.app, "session", None) or StateConfig()
 
         # Stop Caddy if running in system mode
         if state.proxy_mode == "system":
@@ -201,7 +201,7 @@ class AddRouteWizard(ModalScreen[bool]):
         content = self.query_one("#wizard-content")
         content.remove_children()
 
-        state = StateConfig()
+        state = getattr(self.app, "session", None) or StateConfig()
 
         content.mount(Label("Select routing mode:", classes="field-label"))
         content.mount(
@@ -230,7 +230,7 @@ class AddRouteWizard(ModalScreen[bool]):
         content = self.query_one("#wizard-content")
         content.remove_children()
 
-        state = StateConfig()
+        state = getattr(self.app, "session", None) or StateConfig()
 
         # Build review text
         review = f"""
@@ -334,28 +334,17 @@ Domain:      {state.system_domain}
 
     def _apply_route(self) -> None:
         """Apply the route configuration."""
-        state = StateConfig()
+        if hasattr(self.app, "queue_route_change"):
+            self.app.queue_route_change(self.route_name, self.route_upstream, self.route_mode)
+        else:
+            state = StateConfig()
+            state.set_route(
+                self.route_name,
+                self.route_upstream,
+                domain=state.system_domain,
+                enabled=True,
+            )
+            state.proxy_mode = self.route_mode
 
-        # Add the route
-        state.set_route(
-            self.route_name,
-            self.route_upstream,
-            domain=state.system_domain,
-            enabled=True,
-        )
-
-        # Apply selected routing mode and update proxy config
-        state.proxy_mode = self.route_mode
-
-        if self.route_mode == "system":
-            from devhost_cli.caddy_lifecycle import write_system_caddyfile
-
-            write_system_caddyfile(state)
-        elif self.route_mode == "external":
-            from devhost_cli.proxy import export_snippets
-
-            state.set_external_config(state.external_driver)
-            export_snippets(state, [state.external_driver])
-
-        self.app.notify(f"Route '{self.route_name}' added", severity="information")
+        self.app.notify(f"Route '{self.route_name}' added (draft)", severity="information")
         self.app.refresh_data()

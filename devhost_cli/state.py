@@ -386,3 +386,8 @@ class StateConfig:
     def reload(self):
         """Reload state from disk"""
         self._load()
+
+    def replace_state(self, new_state: dict) -> None:
+        """Replace state from a raw dict and persist to disk."""
+        self._state = self._merge_defaults(new_state)
+        self._save()

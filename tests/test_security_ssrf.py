@@ -6,9 +6,10 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from router.app import app
 
@@ -42,6 +43,18 @@ class DummyAsyncClient:
 
     async def aclose(self):
         pass
+
+
+class DummySendClient:
+    def __init__(self):
+        self.captured_request: dict | None = None
+
+    def build_request(self, method, url, **kwargs):
+        self.captured_request = {"method": method, "url": url, "kwargs": kwargs}
+        return self.captured_request
+
+    async def send(self, request, **kwargs):
+        return DummyResponse()
 
 
 class TestSSRFProtection(unittest.TestCase):
@@ -98,32 +111,26 @@ class TestSSRFProtection(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertIn("private", response.text.lower())
 
-    @patch("router.app.http_client")
-    def test_allow_localhost(self, mock_client):
+    def test_allow_localhost(self):
         """Allow 127.0.0.1:8000 (should 502/200 not 403)"""
-        mock_instance = DummyAsyncClient()
-        mock_client.request = mock_instance.request
         self.config_path.write_text(json.dumps({"api": "127.0.0.1:8000"}))
-        response = self.client.get("/test", headers={"Host": "api.localhost"})
+        with patch("router.app.http_client", new=DummySendClient()):
+            response = self.client.get("/test", headers={"Host": "api.localhost"})
         # Should not be SSRF blocked (403)
         self.assertNotEqual(response.status_code, 403)
 
-    @patch("router.app.http_client")
-    def test_allow_localhost_string(self, mock_client):
+    def test_allow_localhost_string(self):
         """Allow localhost:9000"""
-        mock_instance = DummyAsyncClient()
-        mock_client.request = mock_instance.request
         self.config_path.write_text(json.dumps({"api": "localhost:9000"}))
-        response = self.client.get("/test", headers={"Host": "api.localhost"})
+        with patch("router.app.http_client", new=DummySendClient()):
+            response = self.client.get("/test", headers={"Host": "api.localhost"})
         self.assertNotEqual(response.status_code, 403)
 
-    @patch("router.app.http_client")
-    def test_allow_ipv6_loopback(self, mock_client):
+    def test_allow_ipv6_loopback(self):
         """Allow [::1]:8000 IPv6 loopback"""
-        mock_instance = DummyAsyncClient()
-        mock_client.request = mock_instance.request
         self.config_path.write_text(json.dumps({"api": "[::1]:8000"}))
-        response = self.client.get("/test", headers={"Host": "api.localhost"})
+        with patch("router.app.http_client", new=DummySendClient()):
+            response = self.client.get("/test", headers={"Host": "api.localhost"})
         self.assertNotEqual(response.status_code, 403)
 
     def test_block_link_local_ipv4(self):
@@ -135,7 +142,7 @@ class TestSSRFProtection(unittest.TestCase):
     def test_websocket_ssrf_protection(self):
         """WebSocket upgrade must also block SSRF targets"""
         self.config_path.write_text(json.dumps({"api": "10.0.0.1:8080"}))
-        with self.assertRaises(Exception):
+        with self.assertRaises(WebSocketDisconnect):
             with self.client.websocket_connect("/ws/test", headers={"Host": "api.localhost"}):
                 pass
 
@@ -143,9 +150,7 @@ class TestSSRFProtection(unittest.TestCase):
         """Allow private networks when DEVHOST_ALLOW_PRIVATE_NETWORKS=1"""
         os.environ["DEVHOST_ALLOW_PRIVATE_NETWORKS"] = "1"
         self.config_path.write_text(json.dumps({"api": "192.168.1.100:3000"}))
-        with patch("router.app.http_client") as mock_client:
-            mock_instance = DummyAsyncClient()
-            mock_client.request = mock_instance.request
+        with patch("router.app.http_client", new=DummySendClient()):
             response = self.client.get("/test", headers={"Host": "api.localhost"})
             # Should not be 403 when opt-in enabled
             self.assertNotEqual(response.status_code, 403)

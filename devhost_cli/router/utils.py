@@ -51,20 +51,21 @@ def extract_subdomain(host_header: str | None, base_domain: str | None = None) -
         return None
     # strip port if present
     host_only = host_header.split(":")[0].strip().lower()
-    
+
     # Security: Validate hostname for control characters and RFC compliance
     try:
         from devhost_cli.router.security import validate_hostname
+
         valid, error_msg = validate_hostname(host_only)
         if not valid:
             logger.warning("Invalid hostname in Host header: %s - %s", host_only, error_msg)
             return None
     except ImportError:
         # Security module not available - basic validation
-        if any(c in host_only for c in ['\r', '\n', '\x00']):
+        if any(c in host_only for c in ["\r", "\n", "\x00"]):
             logger.warning("Control characters in Host header: %r", host_only)
             return None
-    
+
     suffix = f".{base_domain}"
     if not host_only.endswith(suffix):
         return None

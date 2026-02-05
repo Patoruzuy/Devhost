@@ -1,214 +1,126 @@
-# Copilot / AI Agent Instructions for Devhost v3.0
+# Copilot / AI Agent Instructions for Devhost (v3)
 
-Keep guidance concise. Focus on the three-mode architecture, state management, and common developer workflows.
+Keep guidance concise and implementation-accurate. Devhost is about **ports + DNS + HTTP(S)/WS proxying**; prefer concrete, verifiable statements over assumptions.
 
-## Architecture Overview
+## Architecture (Proxy Modes)
 
-Devhost v3.0 operates in **three modes**:
+Devhost v3 has **four** proxy modes (stored in `~/.devhost/state.yml`):
 
-1. **Gateway Mode** (default) — Router on port 7777, no admin needed
-   - URL pattern: `http://myapp.localhost:7777`
-   - Router: `router/app.py` (FastAPI)
-   
-2. **System Mode** — Caddy on port 80/443, one-time admin setup
-   - URL pattern: `http://myapp.localhost` (no port)
-   - Requires: `devhost proxy upgrade --to system`
-   
-3. **External Mode** — Integrates with existing nginx/Traefik
-   - Uses config snippets: `devhost proxy export caddy|nginx`
+1. `off` — no proxy management
+2. `gateway` (default) — built-in FastAPI router on a local port (default `7777`)
+   - URL pattern: `http://<name>.<domain>:<gateway_port>`
+3. `system` — Devhost-managed Caddy on `80/443` (one-time admin setup on Windows)
+   - URL pattern: `http(s)://<name>.<domain>` (no port)
+4. `external` — integrate with an existing proxy (Caddy/nginx/Traefik); Devhost generates/attaches snippets
 
-## Key Files & Modules
+## Persistence (What Writes What)
 
-### CLI Package (`devhost_cli/`)
-| File | Purpose |
-|------|---------|
-| `main.py` | Entry point, Click command groups |
-| `cli.py` | Core CLI commands (add, remove, list) |
-| `config.py` | Legacy config handling (devhost.json) |
-| `state.py` | v3 state management (~/.devhost/state.yml) |
-| `caddy.py` | Caddy lifecycle management |
-| `tunnel.py` | cloudflared/ngrok/localtunnel integration |
-| `runner.py` | Framework app runner |
-| `router_manager.py` | Router process management |
-| `validation.py` | Target/port validation |
-| `platform.py` | Platform detection |
-| `windows.py` | Windows-specific helpers |
+Devhost uses **two** user-owned files under `~/.devhost/`:
 
-### Router (`router/`)
-| File | Purpose |
-|------|---------|
-| `app.py` | FastAPI proxy with WebSocket support |
-| `requirements.txt` | Router dependencies (httpx, websockets) |
-| `Dockerfile` | Container build (port 7777) |
+- `~/.devhost/devhost.json` — **router input** and mapping source-of-truth (subdomain → target)
+  - Managed via `devhost_cli.config.Config`
+  - Values are ints (ports) or strings (e.g. `127.0.0.1:8000`, `http://host:port`, `https://host:port`)
+- `~/.devhost/state.yml` — v3 **mode/proxy/tunnel/integrity** state (and a mirrored route model for v3 tooling)
+  - Managed via `devhost_cli.state.StateConfig`
+  - CLI keeps `state.yml` routes in sync when you `devhost add/remove`
 
-### Frameworks (`devhost_cli/frameworks/`)
-| File | Purpose |
-|------|---------|
-| `flask.py` | Flask auto-run helper |
-| `fastapi.py` | FastAPI auto-run helper |
-| `django.py` | Django management command helper |
+## Key Modules
 
-### Middleware (`devhost_cli/middleware/`)
-| File | Purpose |
-|------|---------|
-| `asgi.py` | ASGI middleware for auto-registration |
-| `wsgi.py` | WSGI middleware for auto-registration |
+### CLI (`devhost_cli/`)
+- `main.py` — `argparse` CLI (no Click/rich-click)
+- `cli.py` — core commands (add/remove/list/url/open/status/etc.)
+- `config.py` — `devhost.json` + domain file handling (defaults to `~/.devhost/`)
+- `state.py` — `StateConfig` (proxy modes, routes mirror, tunnels, integrity hashes)
+- `router_manager.py` — starts/stops the router process (uses in-repo router when available)
+- `proxy.py` + `caddy_lifecycle.py` — external/system proxy integration
 
-## State Management
+### Router
+Devhost can run either router implementation:
 
-**Primary state file**: `~/.devhost/state.yml`
+- In-repo router (used when developing from this repo): `router/app.py`
+- Packaged router (used when installed via pip without the `router/` folder): `devhost_cli/router/core.py` (`--factory devhost_cli.router.core:create_app`)
 
-```yaml
-version: 3
-proxy:
-  mode: gateway  # gateway | system | external
-  gateway:
-    listen: "127.0.0.1:7777"
-routes:
-  api:
-    upstream: "127.0.0.1:8000"
-    domain: "localhost"
-    enabled: true
-tunnels:
-  api:
-    provider: cloudflared
-    public_url: "https://abc123.trycloudflare.com"
-    pid: 12345
+Both expose the same functional surface:
+
+- `GET /health`
+- `GET /metrics`
+- `GET /routes`
+- `GET /mappings`
+- `WEBSOCKET /{full_path:path}` (wildcard WS proxy)
+- `/{full_path:path}` (wildcard HTTP proxy; all common methods)
+
+Note: there is **no** `/status` endpoint and **no** dedicated `/ws/*` route prefix — WS proxying is the wildcard websocket route.
+
+## StateConfig API (Actual)
+
+`StateConfig` in `devhost_cli/state.py` provides:
+- `proxy_mode` (`off|gateway|system|external`), `gateway_port`, `system_domain`
+- `routes` (property), `get_route(name)`, `set_route(name, upstream, domain="localhost", enabled=True, tags=None)`, `remove_route(name)`
+- tunnels: `get_active_tunnel(name)`, `get_all_tunnels()`, `set_tunnel(name, tunnel_info)`, `remove_tunnel(name)`
+- integrity: `record_hash(path)`, `check_all_integrity()`, `backup_file(path)`
+
+## CLI Commands (Reality)
+
+Core:
+```bash
+devhost add <name> <target>         # <port> | <host>:<port> | http(s)://<host>:<port>
+devhost remove <name>
+devhost list [--json]
+devhost url [name]
+devhost open [name]
+devhost start | stop | status [--json]
+devhost integrity
 ```
 
-**StateConfig class** (`state.py`):
-- `get_routes()`, `set_route()`, `remove_route()`
-- `get_tunnel()`, `set_tunnel()`, `remove_tunnel()`
-- Auto-creates `~/.devhost/` directory
-
-**Legacy config**: `devhost.json` (simple name→port mapping, still supported)
-
-## Router Details
-
-**Port**: 7777 (Gateway mode default)
-
-**Endpoints**:
-- `GET /health` — Health check
-- `GET /status` — Router status + routes
-- `GET /ws/{path}` — WebSocket proxy
-- `GET /{path}` — HTTP proxy (all methods)
-
-**Key functions** in `router/app.py`:
-- `extract_subdomain(host, base_domain)` — Parse subdomain from Host header
-- `parse_target(value)` — Normalize target (int, "host:port", or URL)
-- `RouteCache.get_routes()` — Async route loading with file stat caching
-
-**WebSocket proxy**: Bidirectional forwarding via `websockets` library
-
-## CLI Commands
-
-### Core
+Proxy:
 ```bash
-devhost add <name> <port>    # Add route
-devhost remove <name>        # Remove route
-devhost list                 # Show routes
-devhost open <name>          # Open in browser
-devhost url <name>           # Print URL
-devhost status               # Show current mode
+devhost proxy upgrade --to system|gateway
+devhost proxy start|stop|status|reload
+devhost proxy export [--driver caddy|nginx|traefik] [--show]
+devhost proxy attach <driver> [--config-path <path>]
+devhost proxy detach [--config-path <path>]
+devhost proxy transfer <driver> [--config-path <path>] [--no-attach] [--no-verify] [--port 80]
 ```
 
-### Proxy Management
+Developer tools:
 ```bash
-devhost proxy start          # Start router/Caddy
-devhost proxy stop           # Stop proxy
-devhost proxy status         # Show proxy status
-devhost proxy upgrade --to system  # Switch to System mode
-devhost proxy export caddy   # Export Caddy snippet
-devhost proxy attach caddy   # Attach to existing Caddyfile
+devhost dashboard                  # Textual TUI (requires: devhost[tui])
+devhost tunnel start|stop|status
+devhost qr [name]                  # requires: devhost[qr]
+devhost oauth [name]
+devhost env sync [--name <name>] [--file .env] [--dry-run]
+devhost logs [-f] [-n 50] [--clear]
 ```
 
-### Tunnels
-```bash
-devhost tunnel start [name] [--provider cloudflared|ngrok|localtunnel]
-devhost tunnel stop [name]
-devhost tunnel status
+## Common Patterns (Programmatic)
+
+### Add/update a mapping in code
+```python
+from devhost_cli.config import Config
+from devhost_cli.state import StateConfig
+
+cfg = Config()
+routes = cfg.load()
+routes["api"] = "127.0.0.1:8000"
+cfg.save(routes)
+
+# Optional: keep v3 state routes in sync for proxy/tunnel tooling
+StateConfig().set_route("api", upstream="127.0.0.1:8000", domain=cfg.get_domain(), enabled=True)
 ```
 
-### Developer Tools
-```bash
-devhost dashboard            # TUI dashboard (requires textual)
-devhost qr [name]            # QR code for LAN access
-devhost oauth [name]         # OAuth redirect URIs
-devhost env sync             # Sync .env with URLs
-devhost doctor               # Full diagnostics
-```
-
-## Testing
+## Testing / Linting
 
 ```bash
-# Run all tests
 python -m unittest discover
-
-# Individual test
-python -m unittest tests.test_app
-
-# Lint
 python -m ruff check .
 python -m ruff format --check .
 ```
 
-**Test patterns**:
-- Use `unittest` + `fastapi.TestClient`
-- Patch `httpx.AsyncClient` for router tests
-- Set `DEVHOST_CONFIG` to temp file for isolation
-
-## Docker
+## Dev Setup (Windows-friendly)
 
 ```bash
-docker compose up --build -d
-curl -H "Host: hello.localhost" http://127.0.0.1:7777/
+python -m pip install -U pip setuptools wheel
+python -m pip install -e ".[dev,tui]"
 ```
 
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `DEVHOST_CONFIG` | Override config file path |
-| `DEVHOST_DOMAIN` | Override base domain (default: localhost) |
-| `DEVHOST_LOG_LEVEL` | DEBUG/INFO/WARNING/ERROR |
-| `DEVHOST_LOG_REQUESTS` | Enable per-request logging (1/true) |
-
-## Windows Notes
-
-- **PowerShell shim**: `.\devhost.ps1 add hello 8000`
-- **Hosts file**: `devhost hosts sync` (admin) / `devhost hosts clear`
-- **Port conflicts**: `devhost doctor --windows --fix`
-- **Caddy install**: Auto-detected via winget/scoop/choco
-
-## Common Patterns
-
-### Adding a route programmatically
-```python
-from devhost_cli.state import StateConfig
-state = StateConfig()
-state.set_route("api", {"upstream": "127.0.0.1:8000", "enabled": True})
-```
-
-### Framework auto-registration
-```python
-from devhost_cli.runner import run
-from flask import Flask
-app = Flask(__name__)
-run(app, name="myapp")  # Registers + starts on random port
-```
-
-### Middleware auto-registration
-```python
-from fastapi import FastAPI
-from devhost_cli.middleware.asgi import DevhostMiddleware
-app = FastAPI()
-app.add_middleware(DevhostMiddleware)
-```
-
-## Development Workflow
-
-1. **Install editable**: `pip install -e .[dev,tui]`
-2. **Start router**: `make start` or `uvicorn router.app:app --port 7777 --reload`
-3. **Add routes**: `devhost add myapp 8000`
-4. **Test**: `python -m unittest discover`
-5. **Lint**: `python -m ruff check . && python -m ruff format --check .`
+If you see `BackendUnavailable: Cannot import 'setuptools.build_meta'`, you likely ran with `--no-build-isolation` in a venv without `setuptools`.

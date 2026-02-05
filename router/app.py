@@ -30,6 +30,7 @@ except ImportError:
     def validate_upstream_target(host: str, port: int) -> tuple[bool, str | None]:
         return (True, None)
 
+
 # Global client
 http_client: httpx.AsyncClient | None = None
 
@@ -435,6 +436,8 @@ async def websocket_proxy(websocket: WebSocket, full_path: str):
 
     routes = await ROUTE_CACHE.get_routes()
 
+    request_id = str(uuid.uuid4())[:8]
+
     # Extract subdomain from headers
     host_header = None
     for header in websocket.headers.raw:
@@ -456,6 +459,23 @@ async def websocket_proxy(websocket: WebSocket, full_path: str):
         return
 
     target_scheme, target_host, target_port = target
+
+    # Security: SSRF protection - validate upstream target (before accepting the handshake)
+    valid, error_msg = validate_upstream_target(target_host, target_port)
+    if not valid:
+        logger.error(
+            "[%s] SSRF protection blocked WebSocket to %s:%d - %s",
+            request_id,
+            target_host,
+            target_port,
+            error_msg,
+        )
+        try:
+            await websocket.close(code=1008, reason="Security policy blocked this upstream (SSRF protection)")
+        except Exception:
+            pass
+        return
+
     ws_scheme = "wss" if target_scheme == "https" else "ws"
     upstream_url = f"{ws_scheme}://{target_host}:{target_port}/{full_path}"
 
@@ -463,7 +483,6 @@ async def websocket_proxy(websocket: WebSocket, full_path: str):
     if websocket.url.query:
         upstream_url = f"{upstream_url}?{websocket.url.query}"
 
-    request_id = str(uuid.uuid4())[:8]
     logger.info("[%s] WebSocket connection: %s.%s -> %s", request_id, subdomain, base_domain, upstream_url)
 
     await websocket.accept()
@@ -576,18 +595,20 @@ async def wildcard_proxy(request: Request, full_path: str):
 
     # Build upstream URL
     target_scheme, target_host, target_port = target
-    
+
     # Security: SSRF protection - validate upstream target
     valid, error_msg = validate_upstream_target(target_host, target_port)
     if not valid:
-        logger.error("[%s] SSRF protection blocked request to %s:%d - %s", request_id, target_host, target_port, error_msg)
+        logger.error(
+            "[%s] SSRF protection blocked request to %s:%d - %s", request_id, target_host, target_port, error_msg
+        )
         METRICS.record(subdomain, 403)
-        
+
         # Provide migration hint for legitimate local development
         hint = None
         if "private IP" in (error_msg or ""):
             hint = "This appears to be a local development app. Set DEVHOST_ALLOW_PRIVATE_NETWORKS=1 to enable."
-        
+
         return error_response(
             request,
             403,
@@ -595,7 +616,7 @@ async def wildcard_proxy(request: Request, full_path: str):
             request_id,
             hint=hint,
         )
-    
+
     url = f"{target_scheme}://{target_host}:{target_port}/{full_path}"
     if request.url.query:
         url = f"{url}?{request.url.query}"

@@ -29,17 +29,17 @@ def is_admin() -> bool:
 
 def confirm_action(action: str, target: str) -> bool:
     """Prompt user to confirm privileged action.
-    
+
     Args:
         action: Action description (e.g., "modify hosts file")
         target: Target of action (e.g., hostname)
-    
+
     Returns:
         True if user confirms, False otherwise
     """
     msg_warning(f"About to {action}: {target}")
     msg_info("This requires administrator privileges and will modify system files.")
-    
+
     try:
         response = input("Continue? [y/N]: ").strip().lower()
         return response in {"y", "yes"}
@@ -94,7 +94,7 @@ def hosts_restore() -> bool:
 
 def hosts_add(hostname: str, confirm: bool = True) -> None:
     """Add hostname to Windows hosts file.
-    
+
     Security:
         - Requires admin privileges
         - Validates hostname format
@@ -104,10 +104,11 @@ def hosts_add(hostname: str, confirm: bool = True) -> None:
     if not hostname:
         logger.warning("hosts_add called with empty hostname")
         return
-    
+
     # Security: Validate hostname format
     try:
         from devhost_cli.router.security import validate_hostname
+
         valid, error_msg = validate_hostname(hostname)
         if not valid:
             msg_error(f"Invalid hostname: {error_msg}")
@@ -119,48 +120,47 @@ def hosts_add(hostname: str, confirm: bool = True) -> None:
             msg_error("Hostname contains invalid characters")
             logger.warning("Rejected hostname with invalid chars: %s", hostname)
             return
-    
+
     # Security: Check admin privileges
     if not is_admin():
         msg_error("Administrator privileges required to modify hosts file")
         msg_info("Run in an elevated PowerShell/Command Prompt")
         logger.error("hosts_add failed: not running as admin")
         return
-    
+
     # Security: Confirm action (unless --yes flag used)
     if confirm and not confirm_action("add hosts entry", hostname):
         logger.info("User cancelled hosts_add for: %s", hostname)
         return
-    
+
     path = hosts_path()
     if not path.exists():
         msg_error(f"Hosts file not found: {path}")
         logger.error("Hosts file missing: %s", path)
         return
-    
+
     try:
         content = path.read_text(encoding="ascii", errors="ignore")
     except Exception as e:
         msg_error(f"Failed to read hosts file: {e}")
         logger.error("Failed to read %s: %s", path, e)
         return
-    
+
     # Check if already exists
     if any(
-        line.strip().startswith("127.0.0.1") and hostname in line and "devhost" in line 
-        for line in content.splitlines()
+        line.strip().startswith("127.0.0.1") and hostname in line and "devhost" in line for line in content.splitlines()
     ):
         msg_info(f"Entry for {hostname} already exists")
         logger.debug("Hosts entry already exists: %s", hostname)
         return
-    
+
     # Backup before modifying
     backup_path = hosts_backup()
     if backup_path:
         logger.info("Created hosts backup: %s", backup_path)
     else:
         msg_warning("Could not create backup (non-critical)")
-    
+
     try:
         with path.open("a", encoding="ascii") as fh:
             fh.write(f"\n127.0.0.1 {hostname} # devhost\n")
@@ -176,7 +176,7 @@ def hosts_add(hostname: str, confirm: bool = True) -> None:
 
 def hosts_remove(hostname: str, confirm: bool = True) -> None:
     """Remove hostname from Windows hosts file.
-    
+
     Security:
         - Requires admin privileges
         - Creates backup before modification
@@ -185,40 +185,40 @@ def hosts_remove(hostname: str, confirm: bool = True) -> None:
     if not hostname:
         logger.warning("hosts_remove called with empty hostname")
         return
-    
+
     # Security: Check admin privileges
     if not is_admin():
         msg_error("Administrator privileges required to modify hosts file")
         msg_info("Run in an elevated PowerShell/Command Prompt")
         logger.error("hosts_remove failed: not running as admin")
         return
-    
+
     # Security: Confirm action
     if confirm and not confirm_action("remove hosts entry", hostname):
         logger.info("User cancelled hosts_remove for: %s", hostname)
         return
-    
+
     path = hosts_path()
     if not path.exists():
         msg_warning("Hosts file not found")
         logger.warning("Hosts file missing: %s", path)
         return
-    
+
     # Backup before modifying
     backup_path = hosts_backup()
     if backup_path:
         logger.info("Created hosts backup: %s", backup_path)
-    
+
     try:
         lines = path.read_text(encoding="ascii", errors="ignore").splitlines()
         original_count = len(lines)
         filtered = [line for line in lines if not (hostname in line and "devhost" in line)]
-        
+
         if len(filtered) == original_count:
             msg_info(f"No entry found for {hostname}")
             logger.debug("No hosts entry to remove: %s", hostname)
             return
-        
+
         path.write_text("\n".join(filtered) + ("\n" if filtered else ""), encoding="ascii")
         msg_success(f"Removed {hostname} from hosts file")
         logger.info("Successfully removed hosts entry: %s", hostname)
@@ -232,7 +232,7 @@ def hosts_remove(hostname: str, confirm: bool = True) -> None:
 
 def hosts_sync() -> None:
     """Sync all mappings to Windows hosts file.
-    
+
     Security:
         - Requires admin privileges
         - Validates all hostnames before adding
@@ -243,21 +243,21 @@ def hosts_sync() -> None:
         msg_info("Run in an elevated PowerShell/Command Prompt")
         logger.error("hosts_sync failed: not running as admin")
         return
-    
+
     domain = Config().get_domain()
     if domain == "localhost":
         msg_info("Using localhost domain, no hosts sync needed")
         logger.debug("Skipping hosts sync for localhost domain")
         return
-    
+
     cfg = Config().load()
     if not cfg:
         msg_info("No routes configured")
         return
-    
+
     msg_info(f"Syncing {len(cfg)} entries to hosts file...")
     logger.info("Starting hosts sync for %d entries", len(cfg))
-    
+
     success_count = 0
     for name in cfg.keys():
         hostname = f"{name}.{domain}"
@@ -267,14 +267,14 @@ def hosts_sync() -> None:
         except Exception as e:
             msg_error(f"Failed to add {hostname}: {e}")
             logger.error("Failed to add %s: %s", hostname, e)
-    
+
     msg_success(f"Synced {success_count}/{len(cfg)} hosts entries")
     logger.info("Hosts sync complete: %d/%d successful", success_count, len(cfg))
 
 
 def hosts_clear(confirm: bool = True) -> None:
     """Clear all devhost entries from Windows hosts file.
-    
+
     Security:
         - Requires admin privileges
         - Creates backup before modification
@@ -285,34 +285,34 @@ def hosts_clear(confirm: bool = True) -> None:
         msg_info("Run in an elevated PowerShell/Command Prompt")
         logger.error("hosts_clear failed: not running as admin")
         return
-    
+
     # Security: Confirm action (dangerous operation)
     if confirm and not confirm_action("clear all devhost entries from hosts file", "ALL ENTRIES"):
         logger.info("User cancelled hosts_clear")
         return
-    
+
     path = hosts_path()
     if not path.exists():
         msg_warning("Hosts file not found.")
         logger.warning("Hosts file missing: %s", path)
         return
-    
+
     # Backup before modifying
     backup_path = hosts_backup()
     if backup_path:
         logger.info("Created hosts backup: %s", backup_path)
-    
+
     try:
         lines = path.read_text(encoding="ascii", errors="ignore").splitlines()
         original_count = len(lines)
         filtered = [line for line in lines if "devhost" not in line]
         removed_count = original_count - len(filtered)
-        
+
         if removed_count == 0:
             msg_info("No devhost entries found")
             logger.debug("No devhost entries to clear")
             return
-        
+
         path.write_text("\n".join(filtered) + ("\n" if filtered else ""), encoding="ascii")
         msg_success(f"Cleared {removed_count} devhost entries")
         logger.info("Successfully cleared %d hosts entries", removed_count)

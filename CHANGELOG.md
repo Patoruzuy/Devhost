@@ -7,8 +7,30 @@ Semantic Versioning.
 
 ## [Unreleased]
 ### Added
+- (nothing yet)
+
+## [3.0.0-alpha.1] - 2026-02-05
+### Added
+- **v3 proxy modes** backed by `~/.devhost/state.yml`: `off`, `gateway`, `system`, `external`.
+- **External proxy integration**: `devhost proxy export|discover|attach|detach|transfer` for Caddy/nginx/Traefik.
+- **System mode Caddy lifecycle**: `devhost proxy upgrade --to system`, start/stop/reload, PID tracking, port-conflict guidance.
+- **Gateway router management**: `devhost start|stop|status` with PID/log files under `~/.devhost/` (and `$TEMP`/`/tmp` logs).
+- **TUI dashboard** (`devhost dashboard`) built on Textual (optional extra: `devhost[tui]`).
+- **Integrity hashing** and drift detection (`devhost integrity`) with backup helpers in state.
+- **Tunnel helpers**: `devhost tunnel start|stop|status` (cloudflared/ngrok/localtunnel).
+- **Developer utilities**: `devhost logs`, `devhost qr`, `devhost oauth`, `devhost env sync`.
 - `devhost fix-http` to convert `https://` mappings back to `http://`.
 - `devhost.ps1` PowerShell shim for easier Windows invocation.
+
+### Changed
+- Default route config is user-owned: `~/.devhost/devhost.json` (with best-effort migration from legacy locations).
+- Copilot + docs guidance updated for the v3 architecture and mode model.
+
+### Removed
+- Unused `click` / `rich-click` dependencies (CLI is `argparse`; dashboard is Textual).
+
+### Security
+- Router SSRF protection blocks cloud metadata endpoints and private networks by default (opt-in via `DEVHOST_ALLOW_PRIVATE_NETWORKS=1`).
 
 ## [2.3.0] - 2026-02-02
 ### Added
