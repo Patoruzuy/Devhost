@@ -17,6 +17,7 @@ from typing import Literal
 from .output import console, print_error, print_info, print_success, print_warning
 from .platform import IS_WINDOWS
 from .state import StateConfig
+from .subprocess_timeouts import get_timeout, TIMEOUT_QUICK, TIMEOUT_STANDARD, TIMEOUT_LONG
 
 # Port conflict detection patterns
 PORT_CONFLICT_HANDLERS: dict[str, str] = {
@@ -97,6 +98,7 @@ def _get_port_owner_windows(port: int) -> tuple[str | None, int | None]:
         capture_output=True,
         text=True,
         check=False,
+        timeout=get_timeout("powershell"),
     )
 
     if not result.stdout.strip():
@@ -118,6 +120,7 @@ def _get_port_owner_unix(port: int) -> tuple[str | None, int | None]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_QUICK,
         )
         if result.stdout.strip():
             try:
@@ -128,6 +131,7 @@ def _get_port_owner_unix(port: int) -> tuple[str | None, int | None]:
                     capture_output=True,
                     text=True,
                     check=False,
+                    timeout=TIMEOUT_QUICK,
                 )
                 name = ps_result.stdout.strip() if ps_result.stdout.strip() else None
                 return (name, pid)
@@ -141,6 +145,7 @@ def _get_port_owner_unix(port: int) -> tuple[str | None, int | None]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_QUICK,
         )
         # Parse ss output - it's complex, just check if there's output
         if result.stdout.strip() and "LISTEN" in result.stdout:
@@ -313,6 +318,7 @@ def is_caddy_running(state: StateConfig) -> bool:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_QUICK,
         )
         return bool(result.stdout.strip())
     else:
@@ -334,6 +340,7 @@ def get_caddy_pid() -> int | None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_QUICK,
         )
         if result.stdout.strip():
             try:
@@ -346,6 +353,7 @@ def get_caddy_pid() -> int | None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_QUICK,
         )
         if result.stdout.strip():
             try:
@@ -412,6 +420,7 @@ def start_caddy(state: StateConfig, force: bool = False) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=get_timeout("caddy_start"),
         )
     else:
         # Unix: use 'caddy start' for background process
@@ -420,6 +429,7 @@ def start_caddy(state: StateConfig, force: bool = False) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=get_timeout("caddy_start"),
         )
 
     if result.returncode != 0:
@@ -460,6 +470,7 @@ def stop_caddy(state: StateConfig, force: bool = False) -> tuple[bool, str]:
         capture_output=True,
         text=True,
         check=False,
+        timeout=get_timeout("caddy_stop"),
     )
 
     if result.returncode != 0:
@@ -492,6 +503,7 @@ def reload_caddy(state: StateConfig) -> tuple[bool, str]:
         capture_output=True,
         text=True,
         check=False,
+        timeout=get_timeout("caddy_reload"),
     )
 
     if result.returncode != 0:

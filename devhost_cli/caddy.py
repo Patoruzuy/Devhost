@@ -9,6 +9,7 @@ from typing import Any
 from .config import Config
 from .platform import IS_WINDOWS
 from .executable_validation import validate_executable
+from .subprocess_timeouts import get_timeout, TIMEOUT_NONE
 
 
 def render_caddyfile(routes: dict[str, Any]) -> str:
@@ -102,7 +103,11 @@ def generate_caddyfile(routes: dict[str, Any] | None = None) -> None:
             if sudo_path:
                 is_valid, error = validate_executable(sudo_path)
                 if is_valid:
-                    subprocess.run([sudo_path, "cp", str(user_caddy), str(system_caddy)], check=False)
+                    subprocess.run(
+                        [sudo_path, "cp", str(user_caddy), str(system_caddy)],
+                        check=False,
+                        timeout=get_timeout("sudo"),
+                    )
                 # If invalid, silently skip (user config still works)
         
         # Reload systemd service
@@ -111,7 +116,11 @@ def generate_caddyfile(routes: dict[str, Any] | None = None) -> None:
             is_valid_systemctl, _ = validate_executable(systemctl_path)
             is_valid_sudo, _ = validate_executable(sudo_path)
             if is_valid_systemctl and is_valid_sudo:
-                subprocess.run([sudo_path, systemctl_path, "reload", "caddy"], check=False)
+                subprocess.run(
+                    [sudo_path, systemctl_path, "reload", "caddy"],
+                    check=False,
+                    timeout=get_timeout("systemctl"),
+                )
 
 
 def print_caddyfile(routes: dict[str, Any] | None = None) -> None:
@@ -144,4 +153,4 @@ def edit_config() -> None:
         print(f"Warning: Editor validation failed: {error}")
         print("Attempting to open anyway...")
     
-    subprocess.run([editor, str(config_file)], check=False)
+    subprocess.run([editor, str(config_file)], check=False, timeout=TIMEOUT_NONE)
