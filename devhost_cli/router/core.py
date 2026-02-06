@@ -17,6 +17,7 @@ from devhost_cli import __version__
 from devhost_cli.router.cache import RouteCache
 from devhost_cli.router.metrics import Metrics
 from devhost_cli.router.utils import extract_subdomain, load_domain, parse_target
+from devhost_cli.router.connection_pool import create_http_client, request_with_retry, get_pool_metrics
 
 # Optional SSRF protection (security module is available in v3; keep router usable if missing)
 try:
@@ -102,6 +103,15 @@ def create_app() -> FastAPI:
     app = FastAPI()
     route_cache = RouteCache()
     metrics = Metrics()
+    
+    # Create shared HTTP client with optimized connection pooling
+    http_client = create_http_client()
+    
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        """Clean up resources on shutdown."""
+        await http_client.aclose()
+        logger.info("HTTP client closed")
 
     @app.middleware("http")
     async def request_metrics(request: Request, call_next):
@@ -144,8 +154,10 @@ def create_app() -> FastAPI:
 
     @app.get("/metrics")
     async def metrics_endpoint():
-        """Basic request metrics."""
-        return JSONResponse(metrics.snapshot())
+        """Basic request metrics with connection pool stats."""
+        data = metrics.snapshot()
+        data["connection_pool"] = get_pool_metrics()
+        return JSONResponse(data)
 
     @app.get("/routes")
     async def routes_endpoint():
@@ -374,26 +386,26 @@ def create_app() -> FastAPI:
         if request.url.query:
             url = url + "?" + request.url.query
 
-        async with httpx.AsyncClient() as client:
-            headers = dict(request.headers)
-            # remove host header so upstream sees correct host
-            headers.pop("host", None)
-            try:
-                proxy_resp = await client.request(
-                    method=request.method,
-                    url=url,
-                    headers=headers,
-                    content=await request.body(),
-                    timeout=30.0,
-                )
-            except httpx.RequestError as exc:
-                request_id = str(uuid.uuid4())[:8]
-                logger.warning(
-                    "[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc
-                )
-                return JSONResponse(
-                    {"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502
-                )
+        headers = dict(request.headers)
+        # remove host header so upstream sees correct host
+        headers.pop("host", None)
+        
+        try:
+            proxy_resp = await request_with_retry(
+                http_client,
+                method=request.method,
+                url=url,
+                headers=headers,
+                content=await request.body(),
+            )
+        except httpx.RequestError as exc:
+            request_id = str(uuid.uuid4())[:8]
+            logger.warning(
+                "[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc
+            )
+            return JSONResponse(
+                {"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502
+            )
 
         # Filter hop-by-hop headers
         excluded = {
