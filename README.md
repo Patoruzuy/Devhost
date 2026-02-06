@@ -5,22 +5,175 @@
 ![PyPI](https://img.shields.io/pypi/v/devhost)
 ![Python](https://img.shields.io/pypi/pyversions/devhost)
 
-**Zero-friction local development routing with subdomain support.**
+**Stop memorizing ports. Start using real domains.**
 
-Devhost eliminates "port salad" by giving your local apps memorable subdomain URLs. No more remembering `localhost:3000`, `localhost:8080`, `localhost:5173` — just use `web.localhost`, `api.localhost`, `admin.localhost`.
+```bash
+# Before: The Port Juggling Hell 😫
+http://localhost:3000   # Which app is this again?
+http://localhost:8080   # Frontend or backend?
+http://localhost:5173   # Wait, did I change the port?
 
-## ✨ Features
+# After: Devhost Makes It Obvious 🎯
+http://web.localhost:7777      # Your React app
+http://api.localhost:7777      # Your API
+http://admin.localhost:7777    # Your admin panel
+```
 
-- **Gateway Mode** (Default): Single port `7777` for all apps — no admin required
-- **System Mode**: Portless URLs on port 80/443 via Caddy
-- **External Mode**: Integration with existing nginx/Traefik proxies
-- **WebSocket Support**: Full bidirectional WebSocket proxying
-- **Tunnel Integration**: Expose local apps via cloudflared/ngrok/localtunnel
-- **TUI Dashboard**: Interactive terminal dashboard (`devhost dashboard`)
-- **Cross-Platform**: Windows, macOS, Linux
-- **Hot Reload**: Route changes take effect immediately
+**What is Devhost?** A local development router that gives every project its own subdomain. One command, zero config, works instantly on any OS.
 
-## 🧭 Product Principles (Non-Negotiables)
+## Why You Need This
+
+**The Problem:** Working on modern apps means running 5+ services. You're constantly:
+- 🤯 Forgetting which port runs what (`Was it 3000 or 3001?`)
+- 🔒 Breaking OAuth redirects when you restart your server on a different port
+- 🍪 Fighting cookie/CORS issues because everything's on `localhost`
+- 📱 Struggling to test on your phone (`http://192.168.1.whatever:8080`?)
+- 🔗 Sharing broken links with your team (`localhost` only works for you)
+
+**The Solution:** Devhost routes all your apps through meaningful subdomains on a single port. No admin rights needed, works in 60 seconds.
+
+## 🚀 Get Started in 60 Seconds
+
+## 🚀 Get Started in 60 Seconds
+
+```bash
+# 1. Install (one command)
+pip install "devhost[tui]"
+
+# 2. Start routing
+devhost start
+
+# 3. Register your app
+devhost add web 3000
+
+# 4. Open in browser
+devhost open web
+# → Opens http://web.localhost:7777
+```
+
+**That's it.** Your React/Vue/Next.js app now has a real subdomain. Add more apps the same way.
+
+---
+
+## ✨ What Makes Devhost Different
+
+### 🎯 **Works Immediately** (Gateway Mode - Default)
+- No admin rights required
+- No Docker, no containers, no VMs
+- Pure Python, runs anywhere
+- One port (`:7777`) routes everything
+
+### 🔒 **Production-Ready Features**
+- **WebSocket Support**: Hot reload, Socket.IO, real-time apps work out of the box
+- **HTTPS/TLS**: Full certificate management (optional System Mode)
+- **Security Hardened**: SSRF protection, input validation, secure defaults
+- **Tunnel Integration**: Expose to internet with cloudflared/ngrok (one command)
+
+### 🛠️ **Developer Experience**
+- **Interactive Dashboard**: TUI for visual management (`devhost dashboard`)
+- **OAuth Testing**: Stable redirect URLs that don't break when you restart
+- **Mobile Testing**: Access from your phone (`http://api.localhost:7777`)
+- **Framework Integration**: Drop-in support for Flask, FastAPI, Django
+- **Team Sharing**: Export routes as nginx/Caddy configs (External Mode)
+
+### 🚀 **Three Modes, One Tool**
+
+```
+┌─────────────────────────────────────────────────┐
+│  Gateway Mode (Default)                         │
+│  ✓ Works instantly, no setup                    │
+│  ✓ Port 7777 routes all apps                    │
+│  ✓ http://app.localhost:7777                    │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│  System Mode (Optional)                         │
+│  ✓ Portless URLs (ports 80/443)                 │
+│  ✓ Managed Caddy with auto-certs                │
+│  ✓ http://app.localhost (production-like)       │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│  External Mode (Advanced)                       │
+│  ✓ Integrate with existing nginx/Traefik        │
+│  ✓ Generate config snippets                     │
+│  ✓ Team consistency without lock-in             │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## 🎬 Real-World Use Cases
+
+### 🏗️ Microservices Development
+```bash
+devhost add frontend 3000
+devhost add api 8000
+devhost add auth 4000
+devhost add db-admin 5432
+
+# Access everything with meaningful names
+http://frontend.localhost:7777
+http://api.localhost:7777
+http://auth.localhost:7777
+http://db-admin.localhost:7777
+```
+
+### 🔐 OAuth/OIDC Testing
+```bash
+# Your OAuth redirect URL stays stable
+# (No more "redirect_uri mismatch" errors when you restart!)
+
+Redirect URI: http://auth.localhost:7777/callback
+→ Works every time, even after restarts
+```
+
+### 📱 Mobile App Development
+```bash
+devhost tunnel start api
+# → Exposes http://api.localhost:7777 as https://random-url.trycloudflare.com
+# → Test your mobile app against your local backend
+```
+
+### 👥 Team Development
+```bash
+# Export your setup for the team
+devhost proxy export --driver nginx > team-nginx.conf
+
+# Everyone uses the same subdomain structure
+# → No more "works on my machine" URL issues
+```
+
+---
+
+## 📖 Documentation
+
+- **[Why Devhost?](docs/why.md)** — Detailed benefits and comparisons
+- **[Installation](docs/installation.md)** — OS-specific setup guides  
+- **[Getting Started](docs/getting-started.md)** — Comprehensive tutorial
+- **[Proxy Modes](docs/modes.md)** — Gateway vs System vs External
+- **[CLI Reference](docs/cli.md)** — All commands and options
+- **[Security Guide](docs/security-configuration.md)** — Security features and best practices
+- **[Performance Tuning](docs/performance.md)** — Optimization and monitoring
+- **[Architecture](docs/architecture.md)** — How it works internally
+
+---
+
+## 🔒 Built for Safety
+
+Devhost is designed for **local development only** with security baked in:
+
+- ✅ **Localhost-only binding** — Never exposed to your network by default
+- ✅ **SSRF protection** — Blocks cloud metadata endpoints and private networks  
+- ✅ **Input validation** — All routes and hostnames validated before use
+- ✅ **No privilege required** — Gateway mode runs as a regular user
+- ✅ **Audit logging** — Track all configuration changes
+
+Need to proxy to your LAN? Set `DEVHOST_ALLOW_PRIVATE_NETWORKS=1` explicitly.
+
+📖 **Full security documentation**: [docs/security-configuration.md](docs/security-configuration.md)
+
+---
 
 ### What Devhost Does
 
@@ -62,24 +215,18 @@ Devhost eliminates "port salad" by giving your local apps memorable subdomain UR
 
 No ambiguity. Each mode has a clear, concrete outcome.
 
-## � Security
+---
+
+## 🔒 Security
 
 Devhost v3.0 implements defense-in-depth security measures:
 
-- **SSRF Protection**: Blocks access to cloud metadata endpoints (AWS EC2, GCP, Azure) and private networks by default
-- **URL Scheme Validation**: Only allows `http://` and `https://` — rejects `file://`, `ftp://`, and other dangerous schemes
-- **Host Header Injection Prevention**: Validates hostnames against RFC 1123 to prevent header smuggling attacks
-- **Privilege Escalation Prevention** (Windows): Requires administrator privileges for hosts file modifications with confirmation prompts
-- **Localhost-Only Default**: All services bind to `127.0.0.1` by default — no accidental LAN exposure
+- **SSRF Protection**: Blocks access to cloud metadata endpoints (AWS, GCP, Azure) and private networks by default.
+- **URL Scheme Validation**: Only allows `http://` and `https://` — rejects dangerous schemes like `file://` or `data:`.
+- **Host Header Injection Prevention**: Validates hostnames against RFC 1123 to prevent header smuggling.
+- **Privilege Escalation Prevention**: High-privilege actions (System mode setup) require explicit confirmation and admin rights.
 
-For local development scenarios requiring private network access:
-
-```bash
-# Enable proxying to private IPs (192.168.x.x, 10.x.x.x)
-export DEVHOST_ALLOW_PRIVATE_NETWORKS=1
-```
-
-⚠️ **Security Warning**: Never enable private network access in production environments.
+📖 **Detailed Security Guide**: [docs/security-configuration.md](docs/security-configuration.md)
 
 📖 **Full documentation**: [docs/security-configuration.md](docs/security-configuration.md)
 
