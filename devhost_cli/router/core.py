@@ -37,22 +37,30 @@ try:
 except ImportError:  # pragma: no cover
     WEBSOCKETS_AVAILABLE = False
 
-# Configure logging
-LOG_LEVEL = os.getenv("DEVHOST_LOG_LEVEL", "INFO").upper()
-LOG_FILE = os.getenv("DEVHOST_LOG_FILE")
+# Configure logging with structured logging support (Phase 4 L-16)
 LOG_REQUESTS = os.getenv("DEVHOST_LOG_REQUESTS", "").lower() in {"1", "true", "yes", "on"}
-handlers = [logging.StreamHandler()]
-if LOG_FILE:
-    try:
-        handlers.append(logging.FileHandler(LOG_FILE))
-    except Exception:
-        pass
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
-    handlers=handlers,
-    force=True,
-)
+
+# Use structured logging setup if available
+try:
+    from devhost_cli.structured_logging import setup_logging
+    setup_logging()
+except ImportError:
+    # Fallback to basic logging if structured logging not available
+    LOG_LEVEL = os.getenv("DEVHOST_LOG_LEVEL", "INFO").upper()
+    LOG_FILE = os.getenv("DEVHOST_LOG_FILE")
+    handlers = [logging.StreamHandler()]
+    if LOG_FILE:
+        try:
+            handlers.append(logging.FileHandler(LOG_FILE))
+        except Exception:
+            pass
+    logging.basicConfig(
+        level=LOG_LEVEL,
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+        handlers=handlers,
+        force=True,
+    )
+
 logger = logging.getLogger("devhost.router")
 
 
@@ -155,20 +163,22 @@ def create_app() -> FastAPI:
             subdomain = extract_subdomain(host_header, load_domain())
             start = time.time()
             response = await call_next(request)
-            metrics.record(subdomain, response.status_code)
+            
+            # Record metrics with latency (Phase 4 L-17)
+            duration_ms = (time.time() - start) * 1000
+            metrics.record(subdomain, response.status_code, latency_ms=duration_ms)
 
             # Add request ID to response headers
             response.headers["X-Request-ID"] = request_id
 
             if LOG_REQUESTS:
-                duration_ms = int((time.time() - start) * 1000)
                 logger.info(
                     "[%s] %s %s -> %d (%dms)",
                     request_id,
                     request.method,
                     request.url.path or "/",
                     response.status_code,
-                    duration_ms,
+                    int(duration_ms),
                 )
             return response
         finally:
@@ -308,6 +318,8 @@ def create_app() -> FastAPI:
         # Security: SSRF protection - validate upstream target (before accepting the handshake)
         valid, error_msg = validate_upstream_target(target_host, target_port)
         if not valid:
+            # Record SSRF block (Phase 4 L-17)
+            metrics.record_ssrf_block(reason=error_msg or "unknown")
             logger.error(
                 "[%s] SSRF protection blocked WebSocket to %s:%d - %s",
                 request_id,
@@ -329,6 +341,9 @@ def create_app() -> FastAPI:
         logger.info("[%s] WebSocket connection: %s.%s -> %s", request_id, subdomain, base_domain, upstream_url)
 
         await websocket.accept()
+        
+        # Track WebSocket connection (Phase 4 L-17)
+        metrics.record_websocket_connected()
 
         try:
             skip_headers = {
@@ -399,6 +414,9 @@ def create_app() -> FastAPI:
                 await websocket.close(code=1011, reason="Upstream connection failed")
             except Exception:
                 pass
+        finally:
+            # Track WebSocket disconnection (Phase 4 L-17)
+            metrics.record_websocket_disconnected()
 
     @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
     async def wildcard_proxy(request: Request, full_path: str):
@@ -436,6 +454,8 @@ def create_app() -> FastAPI:
         valid, error_msg = validate_upstream_target(target_host, target_port)
         if not valid:
             request_id = str(uuid.uuid4())[:8]
+            # Record SSRF block (Phase 4 L-17)
+            metrics.record_ssrf_block(reason=error_msg or "unknown")
             logger.error(
                 "[%s] SSRF protection blocked request to %s:%d - %s",
                 request_id,
