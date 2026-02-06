@@ -154,9 +154,10 @@ def create_app() -> FastAPI:
 
     @app.get("/metrics")
     async def metrics_endpoint():
-        """Basic request metrics with connection pool stats."""
+        """Basic request metrics with connection pool stats and route cache stats."""
         data = metrics.snapshot()
         data["connection_pool"] = get_pool_metrics()
+        data["route_cache"] = route_cache.get_metrics()  # Phase 4 L-15
         return JSONResponse(data)
 
     @app.get("/routes")
