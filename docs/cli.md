@@ -1,6 +1,6 @@
 # CLI Reference
 
-Devhost is a single binary/entrypoint: `devhost`.
+Devhost is controlled via a single command-line tool: `devhost`.
 
 For the authoritative list of commands and flags:
 
@@ -9,74 +9,54 @@ devhost --help
 devhost <command> --help
 ```
 
-## Core workflow (Gateway mode)
+## Basic Workflow (Gateway Mode)
+
+The default mode when you first install Devhost.
 
 ```bash
-devhost start                 # start the Gateway router (default mode)
-devhost add api 8000          # register a route
-devhost open api              # open http://api.localhost:7777
-devhost list                  # show all routes
-devhost stop                  # stop the Gateway router
+devhost start                 # Start the Gateway router (port 7777)
+devhost add web 3000          # Map http://web.localhost:7777 -> :3000
+devhost list                  # Show all active routes
+devhost open web              # Open the URL in your default browser
+devhost stop                  # Shut down the router
 ```
 
-## Core commands
+## Route Management
 
-- `devhost add <name> <target>`: `<target>` can be a port (`8000`), `host:port`, or a full URL (`https://host:port`).
-- `devhost remove <name>`
-- `devhost list [--json]`
-- `devhost url [name]`
-- `devhost open [name]`
-- `devhost start` / `devhost stop`
-- `devhost status`
-- `devhost validate`
-- `devhost doctor`
-- `devhost logs [--follow] [--lines N] [--clear]`
+- `devhost add <name> <target>`: The target can be a port (`8000`), a host:port (`192.168.1.10:8000`), or a full URL (`https://app.external.com`).
+- `devhost remove <name>`: Deletes the route from configuration.
+- `devhost edit`: Opens the raw `devhost.json` mapping file in your default editor.
+- `devhost list [--json]`: Lists all routes. Use `--json` for automation.
 
-## Domain & DNS
+## Discovery & Health
+
+- `devhost status`: Shows the current proxy mode, router health, and a summary of active routes.
+- `devhost doctor`: Per-platform diagnostic utility that checks for port conflicts, binary availability, and configuration errors.
+- `devhost validate`: Checks if the upstream services for your routes are actually responding.
+- `devhost logs [-f]`: Tails the logs for the router and active processes.
+
+## Proxy Mode Switching (System / External)
 
 ```bash
-devhost domain get
-devhost domain set home
+devhost proxy upgrade --to system    # Switch to portless URLs (port 80)
+devhost proxy upgrade --to gateway   # Switch back to port 7777
 ```
 
-Notes:
-- `localhost` is the easiest base domain (no extra DNS/hosts configuration on most systems).
-- For custom domains (e.g. `home`, `lab`, `dev`), you’ll likely need to configure DNS/hosts. See [Configuration](configuration.md#dns--domains).
+## System Mode (Managed Caddy)
 
-## Proxy modes (System / External)
+- `devhost proxy start`: Starts the managed Caddy instance.
+- `devhost proxy stop`: Stops Caddy.
+- `devhost proxy status`: Shows Caddy process information (PID, uptime).
 
-Mode management:
+## External Proxy Integration
 
-```bash
-devhost proxy upgrade --to system
-devhost proxy upgrade --to gateway
-```
-
-System proxy (Mode 2):
-
-```bash
-devhost proxy start
-devhost proxy status
-devhost proxy reload
-devhost proxy stop
-```
-
-External proxy (Mode 3):
-
-```bash
-devhost proxy export --driver caddy
-devhost proxy export --driver nginx
-devhost proxy export --driver traefik
-
-devhost proxy discover
-devhost proxy attach caddy --config-path /path/to/Caddyfile
-devhost proxy detach --config-path /path/to/Caddyfile
-devhost proxy transfer caddy --config-path /path/to/Caddyfile
-```
-
-See [External Proxy Integration](external-proxy.md) for safe-by-default behavior and drift protection.
+- `devhost proxy export --driver [nginx|caddy|traefik]`: Prints or saves a configuration snippet for use in your own proxy.
+- `devhost proxy attach <driver> --config-path <path>`: Safely injects the Devhost snippet into your existing configuration file.
+- `devhost proxy detach --config-path <path>`: Removes the Devhost-injected block from your configuration.
 
 ## Tunnels
+
+Expose a local route to the public internet using an external provider.
 
 ```bash
 devhost tunnel start api --provider cloudflared
@@ -84,14 +64,29 @@ devhost tunnel status
 devhost tunnel stop api
 ```
 
-Tunnels use external CLIs; see [Tunnels](tunnels.md).
+Supported providers: `cloudflared`, `ngrok`, `localtunnel`.
 
-## Dashboard (TUI)
+## Windows-Specific Commands
+
+- `devhost hosts sync`: Synchronizes your Devhost routes with the Windows `hosts` file (requires Administrator privileges).
+- `devhost hosts clear`: Removes all Devhost-managed entries from the `hosts` file.
+
+## TUI Dashboard
 
 ```bash
-pip install devhost[tui]
 devhost dashboard
 ```
+Requires the `[tui]` extra: `pip install devhost[tui]`.
 
-See [Dashboard](dashboard.md).
+```bash
+devhost diagnostics export
+devhost diagnostics export --output ./devhost-diagnostics.zip
+devhost diagnostics export --no-logs --no-proxy
+devhost diagnostics export --no-redact
+devhost diagnostics preview --no-logs --no-proxy
+devhost diagnostics preview --top 10
+devhost diagnostics upload
+```
 
+By default, secrets in logs/config/state files are redacted in the bundle.
+Use `--no-redact` only when you explicitly need raw data.

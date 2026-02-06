@@ -1,33 +1,55 @@
 # Architecture Overview
 
-Devhost is split into a few clear responsibilities:
+Devhost is built on a modular architecture that separates the data plane (proxying) from the control plane (management).
 
-## CLI (`devhost`)
+## Design Principles
 
-- Manages routes (`~/.devhost/devhost.json`)
-- Manages v3 state (`~/.devhost/state.yml`) for modes, integrity, and proxy metadata
-- Provides diagnostics (`validate`, `doctor`) and helpers (`qr`, `oauth`, `env sync`)
+### 1. Minimal Intrusion
+Devhost avoids modifying system settings unless explicitly requested. The default "Gateway" mode operates entirely in userspace without administrative privileges.
 
-## Gateway router (Mode 1)
+### 2. Transparent State
+All configuration is file-based and stored in human-readable YAML and JSON in `~/.devhost/`. There are no hidden databases.
 
-- FastAPI app that proxies HTTP and WebSocket traffic based on the `Host` header.
-- Listens on a single port (default `7777`) and fans out to upstream targets.
-- Reads routes from `DEVHOST_CONFIG` or `~/.devhost/devhost.json`.
+### 3. Ownership Model
+Devhost only "owns" the artifacts it creates. It treats user-owned configurations (like an existing `nginx.conf`) as sacred and only modifies them using clearly marked, reversible blocks.
 
-## System proxy (Mode 2)
+## Components
 
-- Managed Caddy process that binds to `:80` / `:443`.
-- Devhost generates a Mode-2 Caddyfile under `~/.devhost/proxy/caddy/Caddyfile`.
+### CLI (`devhost`)
+The command-line interface is the primary control point. It manages:
+- **Routes**: Stored in `~/.devhost/devhost.json`.
+- **Global State**: Stored in `~/.devhost/state.yml` (mode, integrity, proxy metadata).
+- **Diagnostics**: Health checks, bundle exports, and "doctor" fixes.
 
-## External proxy integration (Mode 3)
+### Gateway Router (Mode 1)
+A high-performance FastAPI/Uvicorn application that handles the actual proxying.
+- **Traffic Routing**: Uses the `Host` header to dispatch requests to upstream targets.
+- **WebSocket Support**: Automatically detects `Upgrade: websocket` headers and establishes bidirectional proxying.
+- **Full Streaming**: Request and response bodies are streamed to minimize memory usage, supporting large file transfers.
+- **Connection Pooling**: Uses a global `httpx` client to reuse TCP connections.
 
-- Generates snippets for Caddy/nginx/Traefik.
-- Optional attach/detach flows are explicit, reversible, and tracked with integrity hashes.
+### Lifecycle Manager (Mode 2)
+Manages a system-wide Caddy process.
+- **Mode-2 Caddyfile**: Auto-generated in `~/.devhost/proxy/caddy/Caddyfile`.
+- **Process Management**: Monitors the Caddy PID and handles graceful restarts.
+- **Port Conflict Detection**: Proactively identifies processes using ports 80/443 and offers tailored resolution advice.
 
-## Integrity hashing
+### External Proxy Integration (Mode 3)
+Generates configuration snippets for Nginx, Traefik, and Caddy.
+- **Attach/Detach**: Safely injects routes into existing server configurations.
+- **Integrity Hashing**: Uses SHA-256 hashes to detect manual modifications ("drift") in generated files.
 
-Files Devhost writes/owns can be tracked with SHA-256 hashes in `state.yml`:
+## Data Flow
 
-- protects user-owned config from accidental corruption
-- helps detect drift when configs are edited manually
+1. **Request**: Browser requests `http://api.localhost:7777`.
+2. **Detection**: Router receives the request and inspects the `Host` header (`api.localhost:7777`).
+3. **Resolution**: Router looks up "api" in the mapping table.
+4. **Proxy**: Router forwards the request to the upstream (e.g., `127.0.0.1:8000`).
+5. **Streaming**: Data flows back and forth between the client and upstream via full-duplex streams.
 
+## Security Model
+
+Devhost implements a defense-in-depth approach:
+- **SSRF Shield**: Built-in blocklists for 169.254.169.254 and private IP ranges.
+- **Hostname Sanitization**: Strict RFC 1123 validation for all incoming hostnames.
+- **Privilege Separation**: Only the minimum necessary commands (like port 80 binding) request elevation.

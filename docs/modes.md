@@ -1,65 +1,78 @@
-# Modes
+# Proxy Modes
 
-Devhost supports multiple proxy “modes”. Only one mode is active at a time; the current mode lives in `~/.devhost/state.yml`.
+Devhost supports three active proxy modes and an "Off" state. The active mode is stored globally in `~/.devhost/state.yml`.
 
-## Mode 1: Gateway (default)
+## Mode 1: Gateway (Default)
 
-Goal: **work immediately** without admin privileges.
+**Goal**: Immediate value with zero system configuration.
 
-- You run a single local router on `127.0.0.1:7777`.
-- Every app is reached via a subdomain + the gateway port: `http://api.localhost:7777`.
+- **How it works**: Devhost starts a lightweight FastAPI-based router on port `7777`.
+- **URL Pattern**: `http://<name>.<domain>:7777` (e.g., `http://api.localhost:7777`).
+- **Permissions**: No administrator or root privileges required.
+- **Best for**: Quick start, CI/CD, and cases where port 80 is unavailable.
 
-Commands:
-
+### Commands
 ```bash
-devhost start
-devhost stop
-devhost status
+devhost start     # Starts the Gateway router
+devhost status    # Checks if the router is healthy
+devhost stop      # Stops the router
 ```
 
-## Mode 2: System (managed Caddy)
+---
 
-Goal: **portless URLs** (production parity): `http://api.localhost`.
+## Mode 2: System (Managed Caddy)
 
-- Devhost generates and runs a Caddy config that binds to `:80` (and optionally `:443`).
-- Requires admin rights to bind privileged ports / adjust hosts on some setups.
+**Goal**: Full production parity with portless URLs.
 
-Commands:
+- **How it works**: Devhost manages a dedicated [Caddy](https://caddyserver.com/) instance that binds to the standard HTTP (80) and HTTPS (443) ports.
+- **URL Pattern**: `http://<name>.<domain>` (e.g., `http://api.localhost`).
+- **Permissions**: Requires a one-time administrator elevation to bind to privileged ports.
+- **Best for**: Realistic cookie testing, complex OAuth flows, and professional demos.
 
+### Commands
 ```bash
-devhost proxy upgrade --to system
-devhost proxy status
-devhost proxy stop
+devhost proxy upgrade --to system  # Switch to System mode
+devhost proxy start                # Start the managed Caddy process
+devhost proxy status               # Check Caddy health and PID
 ```
 
-## Mode 3: External (your existing proxy)
+---
 
-Goal: integrate into existing nginx/Traefik/Caddy setups **without breaking ownership boundaries**.
+## Mode 3: External (Infrastructure Integration)
 
-- Devhost generates snippets.
-- You can *attach* snippets into a user-owned config (explicit + reversible).
-- Integrity hashing helps detect drift.
+**Goal**: Integration with existing Nginx, Traefik, or Caddy setups.
 
-Commands:
+- **How it works**: Devhost generates configuration snippets based on your routes. You can then "attach" these snippets to your existing proxy configuration.
+- **Ownership**: You remain the owner of your proxy's lifecycle. Devhost only provides the route definitions.
+- **Drift Protection**: Uses integrity hashing to warn you if your proxy configuration has changed manually in a way that conflicts with Devhost.
+- **Best for**: Teams with pre-existing complex proxy setups or shared development servers.
 
+### Commands
 ```bash
-devhost proxy export --driver nginx
+devhost proxy export --driver nginx  # Generate a snippet
 devhost proxy attach nginx --config-path /etc/nginx/nginx.conf
-devhost proxy detach --config-path /etc/nginx/nginx.conf
 ```
+
+---
 
 ## Off
 
-Goal: disable proxying and use direct upstreams.
+**Goal**: Route management without proxying.
 
-- Routes can still be stored, but access is direct (e.g. `http://127.0.0.1:8000`).
+- **How it works**: Devhost purely stores the mapping from subdomain to port/URL. No router or proxy is started.
+- **Use case**: You just want to use `devhost list` as a bookmark manager for your local ports.
 
-## Switching modes
+---
+
+## Switching Modes
+
+You can switch between Gateway and System modes using the `upgrade` command:
 
 ```bash
-devhost proxy upgrade --to gateway
+# Move to System mode (portless)
 devhost proxy upgrade --to system
-```
 
-When switching to/from System mode, Devhost may start/stop Caddy depending on route presence and conflicts.
+# Move back to Gateway mode (port 7777)
+devhost proxy upgrade --to gateway
+```
 
