@@ -107,50 +107,116 @@ def create_app() -> FastAPI:
     # Create shared HTTP client with optimized connection pooling
     http_client = create_http_client()
     
+    # Track in-flight requests for graceful shutdown (Phase 4 L-19)
+    in_flight_requests = set()
+    shutdown_event_obj = asyncio.Event()
+    
     @app.on_event("shutdown")
-    async def shutdown_event():
-        """Clean up resources on shutdown."""
+    async def shutdown_handler():
+        """
+        Graceful shutdown handler (Phase 4 L-19).
+        
+        - Wait for in-flight requests to complete
+        - Close HTTP client connection pool
+        - Timeout after 30 seconds for forced shutdown
+        """
+        logger.info("Shutdown initiated...")
+        shutdown_event_obj.set()
+        
+        # Wait for in-flight requests with timeout
+        if in_flight_requests:
+            logger.info(f"Waiting for {len(in_flight_requests)} in-flight requests...")
+            timeout = 30.0  # 30 second timeout
+            start_wait = time.time()
+            
+            while in_flight_requests and (time.time() - start_wait) < timeout:
+                await asyncio.sleep(0.1)
+            
+            if in_flight_requests:
+                logger.warning(
+                    f"Forced shutdown: {len(in_flight_requests)} requests did not complete in {timeout}s"
+                )
+            else:
+                logger.info("All in-flight requests completed")
+        
+        # Close HTTP client
         await http_client.aclose()
-        logger.info("HTTP client closed")
+        logger.info("Shutdown complete")
 
     @app.middleware("http")
     async def request_metrics(request: Request, call_next):
         # Generate unique request ID
         request_id = str(uuid.uuid4())[:8]
 
-        host_header = request.headers.get("host", "")
-        subdomain = extract_subdomain(host_header, load_domain())
-        start = time.time()
-        response = await call_next(request)
-        metrics.record(subdomain, response.status_code)
+        # Track in-flight requests (Phase 4 L-19)
+        in_flight_requests.add(request_id)
+        try:
+            host_header = request.headers.get("host", "")
+            subdomain = extract_subdomain(host_header, load_domain())
+            start = time.time()
+            response = await call_next(request)
+            metrics.record(subdomain, response.status_code)
 
-        # Add request ID to response headers
-        response.headers["X-Request-ID"] = request_id
+            # Add request ID to response headers
+            response.headers["X-Request-ID"] = request_id
 
-        if LOG_REQUESTS:
-            duration_ms = int((time.time() - start) * 1000)
-            logger.info(
-                "[%s] %s %s -> %d (%dms)",
-                request_id,
-                request.method,
-                request.url.path or "/",
-                response.status_code,
-                duration_ms,
-            )
-        return response
+            if LOG_REQUESTS:
+                duration_ms = int((time.time() - start) * 1000)
+                logger.info(
+                    "[%s] %s %s -> %d (%dms)",
+                    request_id,
+                    request.method,
+                    request.url.path or "/",
+                    response.status_code,
+                    duration_ms,
+                )
+            return response
+        finally:
+            # Remove from in-flight tracking
+            in_flight_requests.discard(request_id)
 
     @app.get("/health")
     async def health():
-        """Lightweight health endpoint for liveness checks."""
+        """
+        Enhanced health endpoint for liveness and readiness checks (Phase 4 L-18).
+        
+        Returns:
+        - status: ok or shutting_down
+        - version: router version
+        - uptime_seconds: uptime in seconds
+        - routes_count: number of configured routes
+        - in_flight_requests: current in-flight request count
+        - connection_pool: connection pool health status
+        - memory_mb: approximate memory usage in MB
+        """
         routes = await route_cache.get_routes()
-        return JSONResponse(
-            {
-                "status": "ok",
-                "version": __version__,
-                "routes_count": len(routes),
-                "uptime_seconds": int(time.time() - metrics.start_time),
-            }
-        )
+        pool_metrics = get_pool_metrics()
+        
+        # Get memory usage (optional, gracefully handle if not available)
+        memory_mb = None
+        try:
+            import psutil
+            process = psutil.Process()
+            memory_mb = round(process.memory_info().rss / 1024 / 1024, 1)
+        except Exception:
+            pass  # psutil not available or failed
+        
+        response_data = {
+            "status": "shutting_down" if shutdown_event_obj.is_set() else "ok",
+            "version": __version__,
+            "uptime_seconds": int(time.time() - metrics.start_time),
+            "routes_count": len(routes),
+            "in_flight_requests": len(in_flight_requests),
+            "connection_pool": {
+                "status": "healthy" if pool_metrics.get("success_rate", 0) > 0.9 else "degraded",
+                "success_rate": pool_metrics.get("success_rate", 1.0),
+            },
+        }
+        
+        if memory_mb is not None:
+            response_data["memory_mb"] = memory_mb
+        
+        return JSONResponse(response_data)
 
     @app.get("/metrics")
     async def metrics_endpoint():
