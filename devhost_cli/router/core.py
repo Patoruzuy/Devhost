@@ -87,6 +87,18 @@ def create_app() -> FastAPI:
     Returns:
         Configured FastAPI app instance
     """
+    # Validate configuration on startup
+    try:
+        from devhost_cli.config import validate_config
+        is_valid, errors = validate_config()
+        if not is_valid:
+            logger.error("Config validation failed on startup:")
+            for error in errors:
+                logger.error("  - %s", error)
+            logger.warning("Router will continue but some routes may not work correctly")
+    except Exception as e:
+        logger.warning("Config validation skipped due to error: %s", e)
+    
     app = FastAPI()
     route_cache = RouteCache()
     metrics = Metrics()
