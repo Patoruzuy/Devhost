@@ -14,9 +14,16 @@ http://localhost:8080   # Frontend or backend?
 http://localhost:5173   # Wait, did I change the port?
 
 # After: Devhost Makes It Obvious 🎯
-http://web.localhost:7777      # Your React app
-http://api.localhost:7777      # Your API
-http://admin.localhost:7777    # Your admin panel
+
+# Gateway Mode (works instantly, no setup)
+http://web.localhost:7777
+http://api.localhost:7777
+http://admin.localhost:7777
+
+# System/External Mode (production-like URLs)
+http://web.localhost
+http://api.localhost
+http://admin.localhost
 ```
 
 **What is Devhost?** A local development router that gives every project its own subdomain. One command, zero config, works instantly on any OS.
@@ -31,8 +38,6 @@ http://admin.localhost:7777    # Your admin panel
 - 🔗 Sharing broken links with your team (`localhost` only works for you)
 
 **The Solution:** Devhost routes all your apps through meaningful subdomains on a single port. No admin rights needed, works in 60 seconds.
-
-## 🚀 Get Started in 60 Seconds
 
 ## 🚀 Get Started in 60 Seconds
 
@@ -148,14 +153,14 @@ devhost proxy export --driver nginx > team-nginx.conf
 
 ## 📖 Documentation
 
-- **[Why Devhost?](docs/why.md)** — Detailed benefits and comparisons
-- **[Installation](docs/installation.md)** — OS-specific setup guides  
-- **[Getting Started](docs/getting-started.md)** — Comprehensive tutorial
-- **[Proxy Modes](docs/modes.md)** — Gateway vs System vs External
-- **[CLI Reference](docs/cli.md)** — All commands and options
-- **[Security Guide](docs/security-configuration.md)** — Security features and best practices
-- **[Performance Tuning](docs/performance.md)** — Optimization and monitoring
-- **[Architecture](docs/architecture.md)** — How it works internally
+- **[Why Devhost?](https://github.com/Patoruzuy/Devhost/blob/main/docs/why.md)** — Detailed benefits and comparisons
+- **[Installation](https://github.com/Patoruzuy/Devhost/blob/main/docs/installation.md)** — OS-specific setup guides  
+- **[Getting Started](https://github.com/Patoruzuy/Devhost/blob/main/docs/getting-started.md)** — Comprehensive tutorial
+- **[Proxy Modes](https://github.com/Patoruzuy/Devhost/blob/main/docs/modes.md)** — Gateway vs System vs External
+- **[CLI Reference](https://github.com/Patoruzuy/Devhost/blob/main/docs/cli.md)** — All commands and options
+- **[Security Guide](https://github.com/Patoruzuy/Devhost/blob/main/docs/security-configuration.md)** — Security features and best practices
+- **[Performance Tuning](https://github.com/Patoruzuy/Devhost/blob/main/docs/performance.md)** — Optimization and monitoring
+- **[Architecture](https://github.com/Patoruzuy/Devhost/blob/main/docs/architecture.md)** — How it works internally
 
 ---
 
@@ -171,7 +176,7 @@ Devhost is designed for **local development only** with security baked in:
 
 Need to proxy to your LAN? Set `DEVHOST_ALLOW_PRIVATE_NETWORKS=1` explicitly.
 
-📖 **Full security documentation**: [docs/security-configuration.md](docs/security-configuration.md)
+📖 **Full security documentation**: [Security Guide](https://github.com/Patoruzuy/Devhost/blob/main/docs/security-configuration.md)
 
 ---
 
@@ -219,18 +224,11 @@ No ambiguity. Each mode has a clear, concrete outcome.
 
 ## 🔒 Security
 
-Devhost v3.0 implements defense-in-depth security measures:
+Devhost is built for **local development only** with security hardened by default: SSRF protection, input validation, localhost-only binding, and no privilege escalation.
 
-- **SSRF Protection**: Blocks access to cloud metadata endpoints (AWS, GCP, Azure) and private networks by default.
-- **URL Scheme Validation**: Only allows `http://` and `https://` — rejects dangerous schemes like `file://` or `data:`.
-- **Host Header Injection Prevention**: Validates hostnames against RFC 1123 to prevent header smuggling.
-- **Privilege Escalation Prevention**: High-privilege actions (System mode setup) require explicit confirmation and admin rights.
+📖 **Full security details**: [Security Guide](https://github.com/Patoruzuy/Devhost/blob/main/docs/security-configuration.md)
 
-📖 **Detailed Security Guide**: [docs/security-configuration.md](docs/security-configuration.md)
-
-📖 **Full documentation**: [docs/security-configuration.md](docs/security-configuration.md)
-
-## �🚀 Quick Start
+## 🚀 Quick Start
 
 ### Installation
 
@@ -287,14 +285,6 @@ if __name__ == '__main__':
     # (Auto-registers the route and starts the Gateway router if needed)
 ```
 
-## 📚 Documentation
-
-- Docs index: https://github.com/Patoruzuy/Devhost/blob/main/docs/README.md
-- CLI reference: https://github.com/Patoruzuy/Devhost/blob/main/docs/cli.md
-- Modes: https://github.com/Patoruzuy/Devhost/blob/main/docs/modes.md
-- Configuration: https://github.com/Patoruzuy/Devhost/blob/main/docs/configuration.md
-- Troubleshooting: https://github.com/Patoruzuy/Devhost/blob/main/docs/troubleshooting.md
-
 ## 🎯 Modes
 
 Devhost operates in three modes, each offering different trade-offs:
@@ -345,7 +335,7 @@ devhost add admin 4200       # http://admin.localhost:7777
 
 4. **Real CORS Testing** — CORS doesn't trigger on same `localhost:PORT`. Different subdomains = catch CORS issues before production.
 
-[See all 10 benefits](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-1-gateway-default) including SameSite cookies, Service Workers, mobile testing, TLS/HTTPS matching, and more.
+**[See all 10 benefits →](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-1-gateway-default)**
 
 ### Mode 2: System Proxy
 
@@ -366,7 +356,7 @@ devhost proxy upgrade --to system
 
 4. **Professional Demos** — Showing `:7777` in URLs looks unprofessional. Clean portless URLs look production-ready for client presentations.
 
-[See all 11 benefits](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-2-system-portless-urls) including hardcoded URL detection, browser extensions, mobile app testing, SSL/TLS certificates, and more.
+**[See all 11 benefits →](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-2-system-portless-urls)**
 
 ### Mode 3: External Proxy
 
@@ -388,120 +378,38 @@ devhost proxy attach caddy    # Attach to existing Caddyfile
 
 4. **Emergency Escape Hatch** — Devhost breaks, need to revert immediately? Detach removes only marked sections, preserves the rest. Safe experimentation with quick rollback.
 
-[See all 10 benefits](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-3-external-infrastructure-integration) including team consistency, custom features, multi-environment parity, legacy compatibility, and more.
+**[See all 10 benefits →](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-3-external-infrastructure-integration)**
 
-## 📋 CLI Reference
-
-### Core Commands
+## 📋 Core Commands
 
 ```bash
-devhost start                 # Start gateway router (Mode 1)
-devhost stop                  # Stop gateway router
-devhost add <name> <port>      # Add a route
-devhost remove <name>          # Remove a route
-devhost list                   # Show all routes
-devhost open <name>            # Open in browser
-devhost url <name>             # Print URL
-devhost status                 # Show mode and health
+# Essential commands
+devhost start                      # Start router
+devhost add <name> <port>           # Add route
+devhost list                        # Show all routes
+devhost open <name>                 # Open in browser
+
+# Mode upgrades
+devhost proxy upgrade --to system   # Portless URLs
+devhost proxy export --driver nginx # Generate config
+
+# Advanced features
+devhost tunnel start [name]         # Expose to internet
+devhost dashboard                   # Visual TUI
 ```
 
-### Proxy Management
-
-```bash
-devhost proxy start            # Start proxy (Mode 2: system)
-devhost proxy stop             # Stop proxy
-devhost proxy status           # Show proxy status
-devhost proxy upgrade --to system  # Upgrade to System mode
-devhost proxy export --driver caddy  # Export Caddy snippet
-devhost proxy attach caddy     # Attach to existing config
-devhost proxy detach           # Detach from config
-```
-
-### Tunnel (Expose to Internet)
-
-```bash
-devhost tunnel start [name]    # Start tunnel (auto-detects provider)
-devhost tunnel stop [name]     # Stop tunnel
-devhost tunnel status          # Show active tunnels
-```
-
-### Developer Features
-
-```bash
-devhost qr [name]              # QR code for mobile access
-devhost oauth [name]           # Show OAuth redirect URIs
-devhost env sync               # Sync .env with current URLs
-devhost dashboard              # Interactive TUI dashboard
-```
-
-### Diagnostics
-
-```bash
-devhost doctor                 # Full system diagnostics
-devhost validate               # Quick health check
-devhost integrity check        # Verify file integrity
-```
+📖 **Full CLI reference**: [docs/cli.md](https://github.com/Patoruzuy/Devhost/blob/main/docs/cli.md)
 
 ## ⚙️ Configuration
 
-### State File
+Devhost stores routes in `~/.devhost/devhost.json` and state in `~/.devhost/state.yml`.
 
-Devhost stores its configuration in `~/.devhost/state.yml`:
+**Quick tips:**
+- Use `DEVHOST_CONFIG` to point to a project-local config file
+- Use `DEVHOST_DOMAIN=home` for custom domains (`http://api.home:7777`)
+- Use `DEVHOST_LOG_LEVEL=DEBUG` for troubleshooting
 
-```yaml
-version: 3
-
-proxy:
-  mode: gateway  # gateway | system | external
-  gateway:
-    listen: "127.0.0.1:7777"
-
-routes:
-  api:
-    upstream: "127.0.0.1:8000"
-    domain: "localhost"
-    enabled: true
-  frontend:
-    upstream: "127.0.0.1:3000"
-    domain: "localhost"
-    enabled: true
-```
-
-### Routes File
-
-Routes are stored in `~/.devhost/devhost.json` by default:
-
-```json
-{
-  "api": 8000,
-  "frontend": 3000,
-  "remote": "192.168.1.50:8080"
-}
-```
-
-Use `DEVHOST_CONFIG` to point Devhost at a project-local `devhost.json` (useful for mono-repos or team-shared route files).
-
-### Project Config (Optional)
-
-Create `devhost.yml` in your project for per-project settings:
-
-```yaml
-name: myapp
-port: 8000
-domain: localhost
-auto_register: true
-```
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `DEVHOST_CONFIG` | Override config file path |
-| `DEVHOST_DOMAIN` | Override base domain (default: `localhost`). Examples: `home`, `lab`, `dev` |
-| `DEVHOST_LOG_LEVEL` | Log verbosity (DEBUG/INFO/WARNING/ERROR) |
-| `DEVHOST_LOG_REQUESTS` | Enable per-request logging (1/true) |
-
-**Custom Domains**: Set `DEVHOST_DOMAIN=home` to use `http://api.home:7777` instead of `http://api.localhost:7777`. Perfect for IoT/home lab setups!
+📖 **Full configuration guide**: [docs/configuration.md](https://github.com/Patoruzuy/Devhost/blob/main/docs/configuration.md)
 
 ## 🐳 Docker
 
@@ -585,101 +493,33 @@ Generate a QR code for LAN access:
 devhost qr myapp
 ```
 
-## 🔧 Framework Support
-
-### Flask
+## 🔧 Framework Integration
 
 ```python
+# Flask
 from devhost_cli.frameworks.flask import run_flask
 run_flask(app, name="myapp")
-```
 
-### FastAPI
-
-```python
+# FastAPI  
 from devhost_cli.frameworks.fastapi import run_fastapi
 run_fastapi(app, name="myapi")
-```
 
-### Django
-
-```python
+# Django
 from devhost_cli.frameworks.django import run_django
 run_django()
 ```
 
-### ASGI Middleware
+📖 **Middleware and advanced integration**: See [examples/](https://github.com/Patoruzuy/Devhost/tree/main/examples)
 
-```python
-from fastapi import FastAPI
-from devhost_cli.middleware.asgi import DevhostMiddleware
+---
 
-app = FastAPI()
-app.add_middleware(DevhostMiddleware)
-```
+## 🪟 Windows | 🐳 Docker | 🧪 Development
 
-### WSGI Middleware
+- **Windows users**: See [Windows setup guide](https://github.com/Patoruzuy/Devhost/blob/main/docs/installation.md#windows) for PowerShell wrapper and port 80 troubleshooting
+- **Docker**: Run `docker compose up --build -d` — router available on port 7777
+- **Contributors**: See [docs/architecture.md](https://github.com/Patoruzuy/Devhost/blob/main/docs/architecture.md) for development setup
 
-```python
-from flask import Flask
-from devhost_cli.middleware.wsgi import DevhostWSGIMiddleware
-
-app = Flask(__name__)
-app.wsgi_app = DevhostWSGIMiddleware(app.wsgi_app)
-```
-
-## 🪟 Windows Notes
-
-### PowerShell Shim
-
-Use the PowerShell wrapper for convenience:
-
-```powershell
-.\devhost.ps1 add hello 8000
-.\devhost.ps1 start
-```
-
-### Hosts File (Alternative to DNS)
-
-If wildcard DNS isn't available:
-
-```powershell
-# Run as Administrator
-devhost hosts sync   # Add entries to hosts file
-devhost hosts clear  # Remove entries
-```
-
-### Port 80 Conflicts
-
-```powershell
-devhost doctor --windows       # Check what's using port 80
-devhost doctor --windows --fix # Attempt to fix
-```
-
-## 🧪 Development
-
-### Run Tests
-
-```bash
-python -m unittest discover
-```
-
-### Run Linting
-
-```bash
-python -m ruff check .
-python -m ruff format --check .
-```
-
-### Run Router Locally
-
-```bash
-cd router
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-uvicorn app:app --host 127.0.0.1 --port 7777 --reload
-```
+---
 
 ## 📄 License
 
