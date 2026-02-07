@@ -154,22 +154,21 @@ class StateConfig:
 
     def _save(self):
         """Save state to file with secure permissions"""
-        import stat
         import sys
-        
+
         self._ensure_dirs()
         try:
             # Write atomically
             tmp = self.state_file.with_suffix(".tmp")
             with open(tmp, "w", encoding="utf-8") as f:
                 yaml.dump(self._state, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-            
+
             # Set restrictive permissions before replacing (Unix only)
             if sys.platform != "win32":
                 tmp.chmod(0o600)  # Owner read/write only
-            
+
             tmp.replace(self.state_file)
-            
+
             # Ensure final file also has restrictive permissions (Unix only)
             if sys.platform != "win32":
                 self.state_file.chmod(0o600)

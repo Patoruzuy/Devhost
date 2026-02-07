@@ -8,8 +8,8 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
-from typing import Mapping
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx

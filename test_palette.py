@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Quick test of command palette functionality."""
 
+
 def main() -> int:
     try:
         from devhost_tui.app import DevhostDashboard
