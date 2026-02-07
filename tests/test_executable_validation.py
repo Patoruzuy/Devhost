@@ -118,8 +118,9 @@ class TestExecutableValidation(unittest.TestCase):
         result = find_executable_in_path("definitely_not_a_real_executable_12345")
         self.assertIsNone(result)
 
+    @patch("devhost_cli.executable_validation.is_user_writable")
     @patch("subprocess.run")
-    def test_validate_caddy_success(self, mock_run):
+    def test_validate_caddy_success(self, mock_run, mock_is_writable):
         """Test Caddy validation with successful version check."""
         # Create a fake executable
         test_file = self.temp_path / "caddy"
@@ -132,6 +133,9 @@ class TestExecutableValidation(unittest.TestCase):
         mock_result.returncode = 0
         mock_result.stdout = "Caddy v2.7.4 h1:abc123"
         mock_run.return_value = mock_result
+
+        # Mock is_user_writable to simulate safe location
+        mock_is_writable.return_value = (False, None)
 
         # Skip writability check
         is_valid, error = validate_caddy_executable(str(test_file))
