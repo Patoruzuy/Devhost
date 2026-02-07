@@ -12,7 +12,7 @@ As requested, I have performed a senior-level review of the Devhost repository. 
 ### 🚀 Connection Management (Fixed)
 - **Issue:** The router was creating a new `httpx.AsyncClient` for **every request**.
 - **Impact:** Massive overhead from TCP/SSL handshakes. High latency and port exhaustion under load.
-- **Fix:** Refactored `router/app.py` to use a global `httpx.AsyncClient` managed via FastAPI's lifespan events.
+- **Fix:** Refactored router to use a global `httpx.AsyncClient` managed via FastAPI's lifespan events (now in `devhost_cli/router/core.py`).
 
 ### 🌊 Memory & Streaming (Fixed)
 - **Issue:** The proxy was loading the **entire** request and response bodies into memory (`await request.body()`).
