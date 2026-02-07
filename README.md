@@ -3,7 +3,7 @@
 ![CI](https://github.com/Patoruzuy/Devhost/actions/workflows/ci.yml/badge.svg)
 [![Security Scan](https://github.com/Patoruzuy/Devhost/actions/workflows/security-scan.yml/badge.svg?event=pull_request)](https://github.com/Patoruzuy/Devhost/actions/workflows/security-scan.yml)
 ![Release](https://img.shields.io/github/v/release/Patoruzuy/Devhost)
-![PyPI](https://img.shields.io/pypi/v/devhost)
+[![PyPI](https://github.com/Patoruzuy/Devhost/actions/workflows/publish.yml/badge.svg)](https://github.com/Patoruzuy/Devhost/actions/workflows/publish.yml)
 ![Python](https://img.shields.io/pypi/pyversions/devhost)
 
 **Stop memorizing ports. Start using real domains.**
