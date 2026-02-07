@@ -17,7 +17,7 @@ from typing import Literal
 from .output import console, print_error, print_info, print_success, print_warning
 from .platform import IS_WINDOWS
 from .state import StateConfig
-from .subprocess_timeouts import get_timeout, TIMEOUT_QUICK, TIMEOUT_STANDARD, TIMEOUT_LONG
+from .subprocess_timeouts import TIMEOUT_QUICK, get_timeout
 
 # Port conflict detection patterns
 PORT_CONFLICT_HANDLERS: dict[str, str] = {
@@ -31,6 +31,19 @@ PORT_CONFLICT_HANDLERS: dict[str, str] = {
     "python": "A Python process is using port 80. Check for running dev servers.",
     "node": "A Node.js process is using port 80. Check for running dev servers.",
 }
+
+
+def _format_cmd(cmd: list[str]) -> str:
+    return " ".join(str(part) for part in cmd)
+
+
+def _run_subprocess(
+    cmd: list[str], timeout: float | None, **kwargs
+) -> tuple[subprocess.CompletedProcess | None, str | None]:
+    try:
+        return subprocess.run(cmd, timeout=timeout, **kwargs), None
+    except subprocess.TimeoutExpired:
+        return None, f"Command timed out after {timeout}s: {_format_cmd(cmd)}"
 
 
 def find_caddy_executable() -> str | None:
@@ -93,13 +106,15 @@ def _get_port_owner_windows(port: int) -> tuple[str | None, int | None]:
         @{{ pid = $conn.OwningProcess; name = $proc.ProcessName }} | ConvertTo-Json
     }}
     """
-    result = subprocess.run(
+    result, _ = _run_subprocess(
         ["powershell", "-NoProfile", "-Command", ps_cmd],
+        timeout=get_timeout("powershell"),
         capture_output=True,
         text=True,
         check=False,
-        timeout=get_timeout("powershell"),
     )
+    if result is None:
+        return (None, None)
 
     if not result.stdout.strip():
         return (None, None)
@@ -115,40 +130,40 @@ def _get_port_owner_unix(port: int) -> tuple[str | None, int | None]:
     """Get port owner on Unix-like systems using lsof or ss."""
     # Try lsof first
     if shutil.which("lsof"):
-        result = subprocess.run(
+        result, _ = _run_subprocess(
             ["lsof", "-i", f":{port}", "-t", "-sTCP:LISTEN"],
+            timeout=TIMEOUT_QUICK,
             capture_output=True,
             text=True,
             check=False,
-            timeout=TIMEOUT_QUICK,
         )
-        if result.stdout.strip():
+        if result and result.stdout.strip():
             try:
                 pid = int(result.stdout.strip().split()[0])
                 # Get process name
-                ps_result = subprocess.run(
+                ps_result, _ = _run_subprocess(
                     ["ps", "-p", str(pid), "-o", "comm="],
+                    timeout=TIMEOUT_QUICK,
                     capture_output=True,
                     text=True,
                     check=False,
-                    timeout=TIMEOUT_QUICK,
                 )
-                name = ps_result.stdout.strip() if ps_result.stdout.strip() else None
+                name = ps_result.stdout.strip() if (ps_result and ps_result.stdout.strip()) else None
                 return (name, pid)
             except (ValueError, IndexError):
                 pass
 
     # Fallback to ss
     if shutil.which("ss"):
-        result = subprocess.run(
+        result, _ = _run_subprocess(
             ["ss", "-tlnp", f"sport = :{port}"],
+            timeout=TIMEOUT_QUICK,
             capture_output=True,
             text=True,
             check=False,
-            timeout=TIMEOUT_QUICK,
         )
         # Parse ss output - it's complex, just check if there's output
-        if result.stdout.strip() and "LISTEN" in result.stdout:
+        if result and result.stdout.strip() and "LISTEN" in result.stdout:
             return ("unknown", None)
 
     return (None, None)
@@ -313,14 +328,14 @@ def is_caddy_running(state: StateConfig) -> bool:
         return False
 
     if IS_WINDOWS:
-        result = subprocess.run(
+        result, _ = _run_subprocess(
             ["powershell", "-NoProfile", "-Command", f"Get-Process -Id {pid} -ErrorAction SilentlyContinue"],
+            timeout=TIMEOUT_QUICK,
             capture_output=True,
             text=True,
             check=False,
-            timeout=TIMEOUT_QUICK,
         )
-        return bool(result.stdout.strip())
+        return bool(result and result.stdout.strip())
     else:
         # Unix: check if process exists
         try:
@@ -335,27 +350,27 @@ def is_caddy_running(state: StateConfig) -> bool:
 def get_caddy_pid() -> int | None:
     """Get PID of any running Caddy process."""
     if IS_WINDOWS:
-        result = subprocess.run(
+        result, _ = _run_subprocess(
             ["powershell", "-NoProfile", "-Command", "(Get-Process caddy -ErrorAction SilentlyContinue).Id"],
+            timeout=TIMEOUT_QUICK,
             capture_output=True,
             text=True,
             check=False,
-            timeout=TIMEOUT_QUICK,
         )
-        if result.stdout.strip():
+        if result and result.stdout.strip():
             try:
                 return int(result.stdout.strip())
             except ValueError:
                 pass
     else:
-        result = subprocess.run(
+        result, _ = _run_subprocess(
             ["pgrep", "-x", "caddy"],
+            timeout=TIMEOUT_QUICK,
             capture_output=True,
             text=True,
             check=False,
-            timeout=TIMEOUT_QUICK,
         )
-        if result.stdout.strip():
+        if result and result.stdout.strip():
             try:
                 return int(result.stdout.strip().split()[0])
             except (ValueError, IndexError):
@@ -413,24 +428,28 @@ def start_caddy(state: StateConfig, force: bool = False) -> tuple[bool, str]:
     caddyfile = write_system_caddyfile(state)
 
     # Start Caddy
+    timeout = get_timeout("caddy_start")
     if IS_WINDOWS:
         # Windows: use 'caddy start' for background process
-        result = subprocess.run(
+        result, _ = _run_subprocess(
             [caddy_exe, "start", "--config", str(caddyfile)],
+            timeout=timeout,
             capture_output=True,
             text=True,
             check=False,
-            timeout=get_timeout("caddy_start"),
         )
     else:
         # Unix: use 'caddy start' for background process
-        result = subprocess.run(
+        result, _ = _run_subprocess(
             [caddy_exe, "start", "--config", str(caddyfile)],
+            timeout=timeout,
             capture_output=True,
             text=True,
             check=False,
-            timeout=get_timeout("caddy_start"),
         )
+
+    if result is None:
+        return (False, f"Caddy start timed out after {timeout}s. Check config or system load.")
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() if result.stderr else "Unknown error"
@@ -465,13 +484,16 @@ def stop_caddy(state: StateConfig, force: bool = False) -> tuple[bool, str]:
         return (True, "Caddy is not running")
 
     # Stop Caddy
-    result = subprocess.run(
+    timeout = get_timeout("caddy_stop")
+    result, _ = _run_subprocess(
         [caddy_exe, "stop"],
+        timeout=timeout,
         capture_output=True,
         text=True,
         check=False,
-        timeout=get_timeout("caddy_stop"),
     )
+    if result is None:
+        return (False, f"Caddy stop timed out after {timeout}s.")
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() if result.stderr else "Unknown error"
@@ -498,13 +520,16 @@ def reload_caddy(state: StateConfig) -> tuple[bool, str]:
     caddyfile = write_system_caddyfile(state)
 
     # Reload
-    result = subprocess.run(
+    timeout = get_timeout("caddy_reload")
+    result, _ = _run_subprocess(
         [caddy_exe, "reload", "--config", str(caddyfile)],
+        timeout=timeout,
         capture_output=True,
         text=True,
         check=False,
-        timeout=get_timeout("caddy_reload"),
     )
+    if result is None:
+        return (False, f"Caddy reload timed out after {timeout}s.")
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() if result.stderr else "Unknown error"

@@ -4,13 +4,17 @@ Devhost TUI - Main Application
 Interactive terminal dashboard for managing local development routing.
 """
 
+import difflib
 import os
+import re
+import shutil
 import socket
 import time
 from collections import deque
 from pathlib import Path
 
 import httpx
+from rich.markup import escape
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -22,10 +26,10 @@ from textual.widgets import (
 )
 
 from devhost_cli.state import StateConfig
-from .session import SessionState
-from devhost_cli.validation import parse_target
+from devhost_cli.validation import get_dev_scheme, parse_target
 
 from .scanner import ListeningPort, scan_listening_ports
+from .session import SessionState
 from .widgets import DetailsPane, Sidebar, StatusGrid
 
 
@@ -39,6 +43,7 @@ class DevhostDashboard(App):
     INTEGRITY_INTERVAL = 60.0
     LOG_TAIL_INTERVAL = 1.0
     LOG_BUFFER_LINES = 200
+    LOG_COPY_LINES = 200
     PORT_SCAN_TTL = 30.0
 
     CSS = """
@@ -137,6 +142,15 @@ class DevhostDashboard(App):
         Binding("ctrl+i", "integrity_check", "Integrity"),
         Binding("ctrl+p", "probe_routes", "Probe"),
         Binding("ctrl+s", "apply_changes", "Apply"),
+        Binding("ctrl+b", "export_diagnostics", "Bundle"),
+        Binding("ctrl+shift+b", "preview_diagnostics", "Preview Bundle"),
+        Binding("y", "copy_url", "Copy URL"),
+        Binding("h", "copy_host", "Copy Host"),
+        Binding("u", "copy_upstream", "Copy Upstream"),
+        Binding("0", "logs_level_all", "Log All"),
+        Binding("1", "logs_level_info", "Log Info"),
+        Binding("2", "logs_level_warn", "Log Warn"),
+        Binding("3", "logs_level_error", "Log Error"),
         Binding("e", "external_proxy", "External Proxy"),
         Binding("ctrl+x", "emergency_reset", "Emergency Reset"),
         Binding("a", "add_route", "Add Route"),
@@ -158,6 +172,9 @@ class DevhostDashboard(App):
         self._integrity_results: dict[str, tuple[bool, str]] | None = None
         self._log_buffers: dict[str, deque[str]] = {}
         self._log_offsets: dict[str, int] = {}
+        self._log_filter = ""
+        self._log_levels: set[str] = {"info", "warn", "error"}
+        self._last_probe_time: float | None = None
         self._port_scan_cache: list[ListeningPort] = []
         self._port_scan_ts: float | None = None
         self._port_scan_inflight = False
@@ -175,6 +192,7 @@ class DevhostDashboard(App):
         """Called when app is mounted."""
         self.refresh_data()
         self._start_background_tasks()
+        self._update_log_level_buttons()
 
     def _start_background_tasks(self) -> None:
         """Start background workers and watchers."""
@@ -324,6 +342,7 @@ class DevhostDashboard(App):
 
     def _apply_probe_results(self, results: dict[str, dict]) -> None:
         self._probe_results = results
+        self._last_probe_time = time.time()
         self.refresh_data()
 
     def _apply_integrity_results(self, results: dict[str, tuple[bool, str]]) -> None:
@@ -352,8 +371,224 @@ class DevhostDashboard(App):
             else:
                 self._set_logs_message("No logs available for this route.")
             return
-        content = "\n".join(buffer)
+        lines = list(buffer)
+        filtered = self._apply_log_levels(lines)
+        filtered = self._apply_log_filter(filtered)
+        if self._log_filter:
+            header = f"Filter: {self._log_filter} ({len(filtered)}/{len(lines)} lines)\n"
+        else:
+            header = ""
+        if not filtered:
+            self._set_logs_message("No logs match the current filter.")
+            return
+        rendered = self._format_log_lines(filtered)
+        content = header + "\n".join(rendered)
         self._set_logs_message(content)
+
+    def _apply_log_filter(self, lines: list[str]) -> list[str]:
+        if not self._log_filter:
+            return lines
+        term = self._log_filter.lower()
+        return [line for line in lines if term in line.lower()]
+
+    def _apply_log_levels(self, lines: list[str]) -> list[str]:
+        if not self._log_levels:
+            return lines
+        level_markers = {
+            "info": ["[info]", " info ", "INFO", "info"],
+            "warn": ["[warn]", "WARNING", "warn", "warning"],
+            "error": ["[error]", "ERROR", "error", "exception", "traceback"],
+        }
+        allowed = set(self._log_levels)
+        filtered = []
+        for line in lines:
+            lower = line.lower()
+            matched = False
+            for level in allowed:
+                for marker in level_markers.get(level, []):
+                    if marker.lower() in lower:
+                        matched = True
+                        break
+                if matched:
+                    break
+            if matched or not allowed:
+                filtered.append(line)
+        return filtered
+
+    def _format_log_lines(self, lines: list[str]) -> list[str]:
+        if not self._log_filter:
+            return [escape(line) for line in lines]
+        pattern = re.compile(re.escape(self._log_filter), re.IGNORECASE)
+        formatted: list[str] = []
+        for line in lines:
+            if not pattern.search(line):
+                formatted.append(escape(line))
+                continue
+            parts: list[str] = []
+            last = 0
+            for match in pattern.finditer(line):
+                parts.append(escape(line[last : match.start()]))
+                parts.append(f"[reverse]{escape(match.group(0))}[/reverse]")
+                last = match.end()
+            parts.append(escape(line[last:]))
+            formatted.append("".join(parts))
+        return formatted
+
+    def _get_system_info(self) -> dict[str, str]:
+        info: dict[str, str] = {}
+        try:
+            from devhost_cli.router_manager import Router
+
+            router = Router()
+            running, pid = router.is_running()
+            info["router_status"] = "running" if running else "stopped"
+            if pid:
+                info["router_pid"] = str(pid)
+                try:
+                    import psutil
+
+                    proc = psutil.Process(pid)
+                    uptime = time.time() - proc.create_time()
+                    info["router_uptime"] = self._format_duration(uptime)
+                except Exception:
+                    info["router_uptime"] = "unknown"
+            try:
+                healthy = router._check_health()  # best-effort
+                info["router_health"] = "ok" if healthy else "unhealthy"
+            except Exception:
+                info["router_health"] = "unknown"
+        except Exception:
+            info["router_status"] = "unknown"
+
+        if self._last_probe_time:
+            info["last_probe"] = time.strftime("%H:%M:%S", time.localtime(self._last_probe_time))
+        return info
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        seconds = int(seconds)
+        mins, secs = divmod(seconds, 60)
+        hours, mins = divmod(mins, 60)
+        if hours:
+            return f"{hours}h {mins}m"
+        if mins:
+            return f"{mins}m {secs}s"
+        return f"{secs}s"
+
+    def set_log_filter(self, value: str) -> None:
+        self._log_filter = value.strip()
+        self._refresh_logs_view()
+
+    def clear_log_filter(self) -> None:
+        self._log_filter = ""
+        try:
+            input_widget = self.query_one("#logs-filter")
+            input_widget.value = ""
+        except Exception:
+            pass
+        self._refresh_logs_view()
+
+    def set_log_levels(self, levels: set[str]) -> None:
+        self._log_levels = set(levels)
+        self._refresh_logs_view()
+        self._update_log_level_buttons()
+
+    def toggle_log_level(self, level: str) -> None:
+        if level in self._log_levels:
+            self._log_levels.remove(level)
+        else:
+            self._log_levels.add(level)
+        if not self._log_levels:
+            self._log_levels = {"info", "warn", "error"}
+        self._refresh_logs_view()
+        self._update_log_level_buttons()
+
+    def _update_log_level_buttons(self) -> None:
+        try:
+            details = self.query_one(DetailsPane)
+            details.update_log_level_buttons(self._log_levels)
+        except Exception:
+            pass
+
+    def _copy_to_clipboard(self, text: str) -> bool:
+        try:
+            if hasattr(self, "copy_to_clipboard"):
+                self.copy_to_clipboard(text)
+                return True
+            if hasattr(self, "set_clipboard"):
+                self.set_clipboard(text)
+                return True
+        except Exception:
+            return False
+        return False
+
+    def copy_logs(self) -> None:
+        if not self.selected_route:
+            self.notify("Select a route to copy logs.", severity="warning")
+            return
+        buffer = self._log_buffers.get(self.selected_route)
+        if not buffer:
+            self.notify("No logs available to copy.", severity="warning")
+            return
+        lines = self._apply_log_filter(list(buffer))
+        if not lines:
+            self.notify("No logs match the current filter.", severity="warning")
+            return
+        tail = lines[-self.LOG_COPY_LINES :]
+        content = "\n".join(tail)
+        if self._copy_to_clipboard(content):
+            self.notify(f"Copied {len(tail)} line(s) to clipboard.", severity="information")
+        else:
+            self.notify("Clipboard unavailable in this terminal.", severity="warning")
+
+    def _get_route_info(self) -> tuple[str, str, str] | None:
+        if not self.selected_route:
+            self.notify("Select a route first.", severity="warning")
+            return None
+        route = self.session.get_route(self.selected_route)
+        if not route:
+            self.notify("Route not found.", severity="error")
+            return None
+        domain = route.get("domain", self.session.system_domain)
+        mode = self.session.proxy_mode
+        upstream = route.get("upstream", "")
+        if mode == "gateway":
+            url = f"http://{self.selected_route}.{domain}:{self.session.gateway_port}"
+        else:
+            scheme = get_dev_scheme(upstream)
+            url = f"{scheme}://{self.selected_route}.{domain}"
+        host_header = f"{self.selected_route}.{domain}"
+        return url, host_header, upstream
+
+    def action_copy_url(self) -> None:
+        info = self._get_route_info()
+        if not info:
+            return
+        url, _host, _upstream = info
+        if self._copy_to_clipboard(url):
+            self.notify("URL copied to clipboard.", severity="information")
+        else:
+            self.notify("Clipboard unavailable in this terminal.", severity="warning")
+
+    def action_copy_host(self) -> None:
+        info = self._get_route_info()
+        if not info:
+            return
+        _url, host, _upstream = info
+        if self._copy_to_clipboard(host):
+            self.notify("Host copied to clipboard.", severity="information")
+        else:
+            self.notify("Clipboard unavailable in this terminal.", severity="warning")
+
+    def action_copy_upstream(self) -> None:
+        info = self._get_route_info()
+        if not info:
+            return
+        _url, _host, upstream = info
+        if self._copy_to_clipboard(upstream):
+            self.notify("Upstream copied to clipboard.", severity="information")
+        else:
+            self.notify("Clipboard unavailable in this terminal.", severity="warning")
 
     @work(exclusive=True, thread=True)
     def _probe_routes_worker(self) -> dict:
@@ -475,6 +710,40 @@ class DevhostDashboard(App):
         lines = new_data.splitlines()
         self.call_from_thread(self._append_logs, route_name, lines)
 
+    @work(exclusive=True, thread=True)
+    def _export_diagnostics_worker(self, redact: bool = True) -> None:
+        from devhost_cli.diagnostics import export_diagnostic_bundle
+
+        success, bundle_path, manifest = export_diagnostic_bundle(self.state, redact=redact)
+        self.call_from_thread(self._export_diagnostics_done, success, bundle_path, manifest)
+
+    def _export_diagnostics_done(self, success: bool, bundle_path: Path | None, manifest: dict) -> None:
+        if success and bundle_path:
+            count = len(manifest.get("included", []))
+            redacted = len(manifest.get("redacted", []))
+            self.notify(
+                f"Diagnostic bundle saved: {bundle_path} ({count} files, {redacted} redacted)",
+                severity="information",
+            )
+            errors = manifest.get("redaction_config", {}).get("errors", [])
+            if errors:
+                self.notify(f"Redaction config errors: {len(errors)}", severity="warning")
+        else:
+            error = manifest.get("error", "unknown error")
+            self.notify(f"Diagnostic bundle failed: {error}", severity="error")
+
+    @work(exclusive=True, thread=True)
+    def _preview_diagnostics_worker(self) -> None:
+        from devhost_cli.diagnostics import preview_diagnostic_bundle
+
+        preview = preview_diagnostic_bundle(self.state, redact=True)
+        self.call_from_thread(self._preview_diagnostics_done, preview)
+
+    def _preview_diagnostics_done(self, preview: dict) -> None:
+        from .modals import DiagnosticsPreviewModal
+
+        self.push_screen(DiagnosticsPreviewModal(preview))
+
     def refresh_data(self) -> None:
         """Refresh all data from state."""
         self.state.reload()
@@ -500,7 +769,8 @@ class DevhostDashboard(App):
 
         # Update sidebar
         sidebar = self.query_one(Sidebar)
-        sidebar.update_state(self.session, integrity_results)
+        system_info = self._get_system_info()
+        sidebar.update_state(self.session, integrity_results, system_info)
 
         # Update details if a route is selected
         if self.selected_route:
@@ -521,17 +791,25 @@ class DevhostDashboard(App):
         next_bar.update(next_action)
 
     def _compute_next_action(self) -> str:
+        selected_route = getattr(self, "selected_route", None)
         if self.session.has_changes():
-            return "Next: Apply draft changes (Ctrl+S)"
-        if not self.session.routes:
-            return "Next: Add your first route (A)"
-        if self._integrity_results:
+            base = "Next: Apply draft changes (Ctrl+S)"
+        elif not self.session.routes:
+            base = "Next: Add your first route (A)"
+        elif self._integrity_results:
             drift = [path for path, (ok, _) in self._integrity_results.items() if not ok]
             if drift:
-                return f"Next: Resolve integrity drift ({len(drift)} file(s)) in Integrity tab"
-        if self.session.proxy_mode == "external" and not self.state.external_config_path:
-            return "Next: Attach external proxy config (E)"
-        return "Next: Probe routes (Ctrl+P) or run integrity check (Ctrl+I)"
+                base = f"Next: Resolve integrity drift ({len(drift)} file(s)) in Integrity tab"
+            else:
+                base = "Next: Probe routes (Ctrl+P) or run integrity check (Ctrl+I)"
+        elif self.session.proxy_mode == "external" and not self.state.external_config_path:
+            base = "Next: Attach external proxy config (E)"
+        else:
+            base = "Next: Probe routes (Ctrl+P) or run integrity check (Ctrl+I)"
+
+        if selected_route:
+            base += " · Actions: Y copy URL, H copy Host, U copy Upstream"
+        return base
 
     def action_refresh(self) -> None:
         """Refresh data."""
@@ -566,6 +844,75 @@ class DevhostDashboard(App):
         results = self.state.check_all_integrity()
         self._apply_integrity_results(results)
         self.notify(message, severity="information")
+
+    def _latest_backup_for(self, filepath: Path) -> Path | None:
+        backup_dir = self.state.devhost_dir / "backups"
+        if not backup_dir.exists():
+            return None
+        prefix = f"{filepath.name}."
+        candidates = [
+            path
+            for path in backup_dir.iterdir()
+            if path.is_file() and path.name.startswith(prefix) and path.name.endswith(".bak")
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+
+    def show_integrity_diff(self, filepath: str) -> None:
+        from .modals import IntegrityDiffModal
+
+        path = Path(filepath)
+        backup = self._latest_backup_for(path)
+        if not backup:
+            self.notify("No backup found to diff.", severity="warning")
+            return
+        try:
+            backup_text = backup.read_text(encoding="utf-8", errors="replace").splitlines()
+            if path.exists():
+                current_text = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            else:
+                current_text = []
+            diff_lines = list(
+                difflib.unified_diff(
+                    backup_text,
+                    current_text,
+                    fromfile=str(backup),
+                    tofile=str(path),
+                    lineterm="",
+                )
+            )
+        except OSError as exc:
+            self.notify(f"Failed to read files: {exc}", severity="error")
+            return
+        if not diff_lines:
+            diff_text = "No differences detected."
+        else:
+            if len(diff_lines) > 400:
+                diff_lines = diff_lines[:400] + ["... (truncated)"]
+            diff_text = "\n".join(diff_lines)
+        self.push_screen(IntegrityDiffModal(diff_text))
+
+    def restore_integrity_backup(self, filepath: str) -> None:
+        from .modals import ConfirmRestoreModal
+
+        path = Path(filepath)
+        backup = self._latest_backup_for(path)
+        if not backup:
+            self.notify("No backup found to restore.", severity="warning")
+            return
+        self.push_screen(ConfirmRestoreModal(path, backup))
+
+    def perform_restore(self, target: Path, backup: Path) -> None:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(backup, target)
+            self.state.record_hash(target)
+            results = self.state.check_all_integrity()
+            self._apply_integrity_results(results)
+            self.notify("Backup restored and integrity updated.", severity="information")
+        except OSError as exc:
+            self.notify(f"Restore failed: {exc}", severity="error")
 
     def action_probe_routes(self) -> None:
         """Probe all routes."""
@@ -615,6 +962,34 @@ class DevhostDashboard(App):
 
         self.push_screen(ExternalProxyModal())
 
+    def export_diagnostics(self, redact: bool = True) -> None:
+        label = "redacted" if redact else "raw"
+        if not redact:
+            self.notify("Raw bundle may contain secrets.", severity="warning")
+        self.notify(f"Building diagnostic bundle ({label})...", severity="information")
+        self._export_diagnostics_worker(redact)
+
+    def action_export_diagnostics(self) -> None:
+        """Export diagnostic bundle."""
+        self.export_diagnostics(redact=True)
+
+    def action_preview_diagnostics(self) -> None:
+        """Preview diagnostic bundle contents."""
+        self.notify("Building diagnostics preview...", severity="information")
+        self._preview_diagnostics_worker()
+
+    def action_logs_level_all(self) -> None:
+        self.set_log_levels({"info", "warn", "error"})
+
+    def action_logs_level_info(self) -> None:
+        self.toggle_log_level("info")
+
+    def action_logs_level_warn(self) -> None:
+        self.toggle_log_level("warn")
+
+    def action_logs_level_error(self) -> None:
+        self.toggle_log_level("error")
+
     def action_add_route(self) -> None:
         """Show add route wizard."""
         from .modals import AddRouteWizard
@@ -638,16 +1013,9 @@ class DevhostDashboard(App):
         if self.selected_route:
             import webbrowser
 
-            route = self.session.get_route(self.selected_route)
-            if route:
-                domain = route.get("domain", self.session.system_domain)
-                mode = self.session.proxy_mode
-                if mode == "gateway":
-                    url = f"http://{self.selected_route}.{domain}:{self.session.gateway_port}"
-                elif mode == "system":
-                    url = f"http://{self.selected_route}.{domain}"
-                else:
-                    url = f"http://{self.selected_route}.{domain}"
+            info = self._get_route_info()
+            if info:
+                url, _host, _upstream = info
                 webbrowser.open(url)
                 self.notify(f"Opened: {url}", severity="information")
 

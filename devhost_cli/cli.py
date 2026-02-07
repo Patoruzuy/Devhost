@@ -5,6 +5,7 @@ import platform
 import socket
 import sys
 import webbrowser
+from pathlib import Path
 
 from .caddy import edit_config, generate_caddyfile, print_caddyfile
 from .config import Config
@@ -551,6 +552,177 @@ class DevhostCLI:
         """Print generated Caddyfile"""
         print_caddyfile(self.config.load())
         return True
+
+    def diagnostics_export(
+        self,
+        output_path: str | None = None,
+        include_state: bool = True,
+        include_config: bool = True,
+        include_proxy: bool = True,
+        include_logs: bool = True,
+        redact: bool = True,
+        redaction_file: Path | None = None,
+        size_limit: str | int | None = None,
+        no_size_limit: bool = False,
+    ) -> bool:
+        """Export a diagnostic bundle for support."""
+        from .diagnostics import _format_bytes, export_diagnostic_bundle, parse_size_limit
+
+        try:
+            if not redact:
+                msg_warning("Redaction disabled. Bundle may contain secrets.")
+            size_limit_bytes: int | None = None
+            if no_size_limit:
+                size_limit_bytes = 0
+            elif size_limit is not None:
+                size_limit_bytes = parse_size_limit(size_limit)
+            state = StateConfig()
+            success, bundle_path, manifest = export_diagnostic_bundle(
+                state,
+                output_path=Path(output_path) if output_path else None,
+                include_state=include_state,
+                include_config=include_config,
+                include_proxy=include_proxy,
+                include_logs=include_logs,
+                redact=redact,
+                redaction_file=redaction_file,
+                size_limit_bytes=size_limit_bytes,
+            )
+            if success and bundle_path:
+                count = len(manifest.get("included", []))
+                msg_success(f"Diagnostic bundle saved: {bundle_path} ({count} files)")
+                missing = manifest.get("missing", [])
+                if missing:
+                    msg_warning(f"Missing files: {len(missing)} (not found)")
+                errors = manifest.get("redaction_config", {}).get("errors", [])
+                if errors:
+                    msg_warning(f"Redaction config errors: {len(errors)}")
+                size_limit_val = manifest.get("options", {}).get("size_limit_bytes")
+                if size_limit_val:
+                    msg_info(f"Bundle size limit: {_format_bytes(size_limit_val)}")
+            else:
+                msg_error(f"Failed to export diagnostics: {manifest.get('error', 'unknown error')}")
+            return success
+        except ValueError as exc:
+            msg_error(str(exc))
+            return False
+        except Exception as exc:
+            msg_error(f"Failed to export diagnostics: {exc}")
+            return False
+
+    def diagnostics_preview(
+        self,
+        include_state: bool = True,
+        include_config: bool = True,
+        include_proxy: bool = True,
+        include_logs: bool = True,
+        redact: bool = True,
+        top: int = 30,
+        redaction_file: Path | None = None,
+        size_limit: str | int | None = None,
+        no_size_limit: bool = False,
+    ) -> bool:
+        """Preview diagnostic bundle contents without writing a zip."""
+        from .diagnostics import _format_bytes, parse_size_limit, preview_diagnostic_bundle
+
+        try:
+            if not redact:
+                msg_warning("Redaction disabled. Preview may include sensitive filenames.")
+            size_limit_bytes: int | None = None
+            if no_size_limit:
+                size_limit_bytes = 0
+            elif size_limit is not None:
+                size_limit_bytes = parse_size_limit(size_limit)
+            state = StateConfig()
+            preview = preview_diagnostic_bundle(
+                state,
+                include_state=include_state,
+                include_config=include_config,
+                include_proxy=include_proxy,
+                include_logs=include_logs,
+                redact=redact,
+                redaction_file=redaction_file,
+                size_limit_bytes=size_limit_bytes,
+            )
+            included = preview.get("included_sorted") or preview["included"]
+            missing = preview["missing"]
+            total = preview["total_size"]
+            redacted_count = preview["redacted_count"]
+            msg_info(f"Preview: {len(included)} files, {_format_bytes(total)} total")
+            if preview.get("size_limit_human"):
+                msg_info(f"Size limit: {preview['size_limit_human']}")
+            if preview.get("over_limit"):
+                msg_warning("Bundle exceeds size limit.")
+            if redacted_count:
+                msg_info(f"Redaction will apply to {redacted_count} file(s)")
+            errors = preview.get("redaction_config", {}).get("errors", [])
+            if errors:
+                msg_warning(f"Redaction config errors: {len(errors)}")
+            if missing:
+                msg_warning(f"Missing files: {len(missing)}")
+            for item in included[:top]:
+                suffix = " [redacted]" if item["redact"] else ""
+                msg_info(f"  {item['path']} ({_format_bytes(item['size'])}){suffix}")
+            if len(included) > top:
+                msg_info(f"  …and {len(included) - top} more")
+            return True
+        except ValueError as exc:
+            msg_error(str(exc))
+            return False
+        except Exception as exc:
+            msg_error(f"Failed to preview diagnostics: {exc}")
+            return False
+
+    def diagnostics_upload(
+        self,
+        redact: bool = True,
+        redaction_file: Path | None = None,
+        size_limit: str | int | None = None,
+        no_size_limit: bool = False,
+    ) -> bool:
+        """Prepare a diagnostic bundle in a temp path with upload instructions."""
+        import tempfile
+
+        from .diagnostics import _format_bytes, export_diagnostic_bundle, parse_size_limit
+
+        try:
+            if not redact:
+                msg_warning("Redaction disabled. Bundle may contain secrets.")
+            size_limit_bytes: int | None = None
+            if no_size_limit:
+                size_limit_bytes = 0
+            elif size_limit is not None:
+                size_limit_bytes = parse_size_limit(size_limit)
+            state = StateConfig()
+            temp_dir = Path(tempfile.gettempdir()) / "devhost-diagnostics"
+            success, bundle_path, manifest = export_diagnostic_bundle(
+                state,
+                output_path=temp_dir,
+                redact=redact,
+                redaction_file=redaction_file,
+                size_limit_bytes=size_limit_bytes,
+            )
+            if success and bundle_path:
+                msg_success(f"Diagnostic bundle prepared: {bundle_path}")
+                msg_info("Next steps:")
+                msg_info("  1. Review the bundle contents")
+                msg_info("  2. Upload it to your support channel (do not post publicly)")
+                msg_info("  3. Delete it after sharing if no longer needed")
+                missing = manifest.get("missing", [])
+                if missing:
+                    msg_warning(f"Missing files: {len(missing)}")
+                size_limit_val = manifest.get("options", {}).get("size_limit_bytes")
+                if size_limit_val:
+                    msg_info(f"Bundle size limit: {_format_bytes(size_limit_val)}")
+                return True
+            msg_error(f"Failed to prepare diagnostics: {manifest.get('error', 'unknown error')}")
+            return False
+        except ValueError as exc:
+            msg_error(str(exc))
+            return False
+        except Exception as exc:
+            msg_error(f"Failed to prepare diagnostics: {exc}")
+            return False
 
     def edit(self):
         """Open config in editor"""

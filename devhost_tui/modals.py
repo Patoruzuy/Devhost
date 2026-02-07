@@ -7,9 +7,9 @@ Contains modal screens for:
 - ExternalProxyModal: Attach/detach external proxy configs
 """
 
-from textual.app import ComposeResult
 from pathlib import Path
 
+from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
@@ -78,11 +78,13 @@ class ExternalProxyModal(ModalScreen[bool]):
             yield Label("Config Path (optional):")
             yield Input(placeholder="e.g., /etc/nginx/nginx.conf", id="config-path")
             yield Static("Discover a config file to prefill the path.", id="discover-results")
+            yield Static("Reload hint will appear here.", id="reload-hint")
             with Horizontal(id="external-buttons"):
                 yield Button("Discover", variant="default", id="discover")
                 yield Button("Export Snippet", variant="primary", id="export")
                 yield Button("Attach", variant="success", id="attach")
                 yield Button("Detach", variant="warning", id="detach")
+                yield Button("Show Reload Hint", variant="default", id="reload")
                 yield Button("Close", variant="default", id="close")
 
     def on_mount(self) -> None:
@@ -134,6 +136,20 @@ class ExternalProxyModal(ModalScreen[bool]):
         discover = self.query_one("#discover-results", Static)
         discover.update(message)
 
+    def _update_reload_hint(self, message: str) -> None:
+        hint = self.query_one("#reload-hint", Static)
+        hint.update(message)
+
+    def _reload_hint(self, driver: str, config_path: Path | None) -> str:
+        path = str(config_path) if config_path else "<path>"
+        if driver == "caddy":
+            return f"Reload hint: caddy reload --config {path}"
+        if driver == "nginx":
+            return "Reload hint: nginx -s reload (or systemctl reload nginx)"
+        if driver == "traefik":
+            return "Reload hint: restart Traefik service/container to apply file changes"
+        return "Reload hint: reload your proxy to apply changes"
+
     def _guard_pending_changes(self) -> bool:
         session = getattr(self.app, "session", None)
         if session and session.has_changes():
@@ -169,6 +185,11 @@ class ExternalProxyModal(ModalScreen[bool]):
                 _, path = results[0]
                 config_input = self.query_one("#config-path", Input)
                 config_input.value = str(path)
+            return
+
+        if event.button.id == "reload":
+            config_path = self._get_config_path()
+            self.app.push_screen(ConfirmReloadModal(self._reload_hint(driver, config_path)))
             return
 
         if event.button.id == "export":
@@ -207,6 +228,189 @@ class ExternalProxyModal(ModalScreen[bool]):
             if success:
                 self._refresh_state()
             return
+
+
+class DiagnosticsPreviewModal(ModalScreen[bool]):
+    """Preview diagnostic bundle contents."""
+
+    CSS = """
+    DiagnosticsPreviewModal {
+        align: center middle;
+    }
+
+    #diagnostics-preview {
+        width: 90;
+        height: auto;
+        max-height: 30;
+        border: thick $primary;
+        background: $surface;
+        padding: 2;
+    }
+
+    #diagnostics-preview Static {
+        width: 100%;
+    }
+    """
+
+    def __init__(self, preview: dict):
+        super().__init__()
+        self._preview = preview
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="diagnostics-preview"):
+            yield Label("[b]Diagnostics Preview[/b]")
+            yield Static(self._format_preview(), id="diagnostics-preview-content")
+            yield Button("Close", id="diagnostics-preview-close")
+
+    def _format_preview(self) -> str:
+        included = self._preview.get("included", [])
+        included_sorted = self._preview.get("included_sorted", included)
+        missing = self._preview.get("missing", [])
+        total_size = self._preview.get("total_size_human", "0B")
+        size_limit = self._preview.get("size_limit_human")
+        over_limit = self._preview.get("over_limit", False)
+        redacted_count = self._preview.get("redacted_count", 0)
+        redaction_cfg = self._preview.get("redaction_config", {})
+        redaction_source = redaction_cfg.get("source")
+        redaction_errors = redaction_cfg.get("errors", [])
+        top_n = 20
+        lines = [
+            f"Files: {len(included)}",
+            f"Total size: {total_size}",
+            f"Redacted: {redacted_count}",
+        ]
+        if size_limit:
+            lines.append(f"Size limit: {size_limit}")
+        if over_limit:
+            lines.append("Status: over limit")
+        if redaction_source:
+            lines.append(f"Redaction config: {redaction_source}")
+        if redaction_errors:
+            lines.append(f"Redaction errors: {len(redaction_errors)}")
+        if missing:
+            lines.append(f"Missing: {len(missing)}")
+        lines.append("")
+        lines.append("")
+        lines.append(f"Top {top_n} largest files:")
+        for item in included_sorted[:top_n]:
+            suffix = " (redacted)" if item.get("redact") else ""
+            size = item.get("size", 0)
+            lines.append(f"- {item.get('path')} ({size}B){suffix}")
+        if len(included) > top_n:
+            lines.append(f"... and {len(included) - top_n} more")
+        return "\n".join(lines)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "diagnostics-preview-close":
+            self.dismiss(True)
+
+
+class IntegrityDiffModal(ModalScreen[bool]):
+    """Show unified diff for integrity drift."""
+
+    CSS = """
+    IntegrityDiffModal {
+        align: center middle;
+    }
+
+    #integrity-diff {
+        width: 100;
+        height: auto;
+        max-height: 30;
+        border: thick $primary;
+        background: $surface;
+        padding: 2;
+    }
+    """
+
+    def __init__(self, diff_text: str):
+        super().__init__()
+        self._diff_text = diff_text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="integrity-diff"):
+            yield Label("[b]Integrity Diff[/b]")
+            yield Static(self._diff_text, id="integrity-diff-content")
+            yield Button("Close", id="integrity-diff-close")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "integrity-diff-close":
+            self.dismiss(True)
+
+
+class ConfirmRestoreModal(ModalScreen[bool]):
+    """Confirm restoring a backup over a drifted file."""
+
+    CSS = """
+    ConfirmRestoreModal {
+        align: center middle;
+    }
+
+    #restore-dialog {
+        width: 70;
+        height: auto;
+        border: thick $warning;
+        background: $surface;
+        padding: 2;
+    }
+    """
+
+    def __init__(self, target: Path, backup: Path):
+        super().__init__()
+        self._target = target
+        self._backup = backup
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="restore-dialog"):
+            yield Label("[b]Restore Backup[/b]")
+            yield Label(f"Target: {self._target}")
+            yield Label(f"Backup: {self._backup}")
+            yield Label("This will overwrite the current file.")
+            with Horizontal():
+                yield Button("Cancel", id="restore-cancel")
+                yield Button("Restore", id="restore-confirm", variant="warning")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "restore-confirm":
+            if hasattr(self.app, "perform_restore"):
+                self.app.perform_restore(self._target, self._backup)
+            self.dismiss(True)
+        elif event.button.id == "restore-cancel":
+            self.dismiss(False)
+
+
+class ConfirmReloadModal(ModalScreen[bool]):
+    """Confirm showing reload instructions."""
+
+    CSS = """
+    ConfirmReloadModal {
+        align: center middle;
+    }
+
+    #reload-dialog {
+        width: 70;
+        height: auto;
+        border: thick $warning;
+        background: $surface;
+        padding: 2;
+    }
+    """
+
+    def __init__(self, hint: str):
+        super().__init__()
+        self._hint = hint
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="reload-dialog"):
+            yield Label("[b]Reload Proxy[/b]")
+            yield Label("This will show the reload command. It will not run automatically.")
+            yield Label(self._hint)
+            with Horizontal():
+                yield Button("Close", id="reload-close")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "reload-close":
+            self.dismiss(True)
 
 
 class ConfirmResetModal(ModalScreen[bool]):

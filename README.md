@@ -496,17 +496,12 @@ devhost qr myapp
 ## 🔧 Framework Integration
 
 ```python
-# Flask
-from devhost_cli.frameworks.flask import run_flask
-run_flask(app, name="myapp")
+# All frameworks (auto-detected)
+from devhost_cli.runner import run
+run(app, name="myapp")
 
-# FastAPI  
-from devhost_cli.frameworks.fastapi import run_fastapi
-run_fastapi(app, name="myapi")
-
-# Django
-from devhost_cli.frameworks.django import run_django
-run_django()
+# Works with Flask, FastAPI, Django, and more
+# The runner automatically detects your framework and runs it appropriately
 ```
 
 📖 **Middleware and advanced integration**: See [examples/](https://github.com/Patoruzuy/Devhost/tree/main/examples)

@@ -4,7 +4,7 @@ _devhost_completions() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    cmds="add remove list url open validate export edit resolve doctor info domain hosts caddy start stop status install"
+    cmds="add remove list url open validate export edit resolve doctor info domain hosts caddy start stop status install diagnostics"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${cmds}" -- "$cur") )
@@ -48,6 +48,22 @@ PY
             ;;
         doctor)
             COMPREPLY=( $(compgen -W "--windows" -- "$cur") )
+            return 0
+            ;;
+        diagnostics)
+            COMPREPLY=( $(compgen -W "preview export upload" -- "$cur") )
+            return 0
+            ;;
+        preview)
+            COMPREPLY=( $(compgen -W "--no-state --no-config --no-proxy --no-logs --top --max-size --no-size-limit --redaction-file --redact --no-redact" -- "$cur") )
+            return 0
+            ;;
+        export)
+            COMPREPLY=( $(compgen -W "--no-state --no-config --no-proxy --no-logs --output -o --max-size --no-size-limit --redaction-file --redact --no-redact" -- "$cur") )
+            return 0
+            ;;
+        upload)
+            COMPREPLY=( $(compgen -W "--max-size --no-size-limit --redaction-file --redact --no-redact" -- "$cur") )
             return 0
             ;;
         hosts)

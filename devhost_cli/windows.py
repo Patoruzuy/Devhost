@@ -230,7 +230,7 @@ def hosts_remove(hostname: str, confirm: bool = True) -> None:
         logger.error("Failed to modify %s: %s", path, e)
 
 
-def hosts_sync() -> None:
+def hosts_sync(confirm: bool = True) -> None:
     """Sync all mappings to Windows hosts file.
 
     Security:
@@ -253,6 +253,10 @@ def hosts_sync() -> None:
     cfg = Config().load()
     if not cfg:
         msg_info("No routes configured")
+        return
+
+    if confirm and not confirm_action("sync hosts file entries", f"{len(cfg)} entries for *.{domain}"):
+        logger.info("User cancelled hosts_sync")
         return
 
     msg_info(f"Syncing {len(cfg)} entries to hosts file...")

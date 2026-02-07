@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
+from .executable_validation import find_executable_in_path, validate_executable
 from .platform import IS_WINDOWS
-from .executable_validation import validate_executable
-from .subprocess_timeouts import get_timeout, TIMEOUT_NONE
+from .subprocess_timeouts import TIMEOUT_NONE, get_timeout
 
 
 def render_caddyfile(routes: dict[str, Any]) -> str:
@@ -96,10 +96,10 @@ def generate_caddyfile(routes: dict[str, Any] | None = None) -> None:
 
     # Sync to system Caddy config (non-Windows)
     if not IS_WINDOWS:
+        sudo_path = shutil.which("sudo")
         system_caddy = Path("/etc/caddy/Caddyfile")
         if system_caddy.exists():
             # Validate sudo executable
-            sudo_path = shutil.which("sudo")
             if sudo_path:
                 is_valid, error = validate_executable(sudo_path)
                 if is_valid:
@@ -109,10 +109,10 @@ def generate_caddyfile(routes: dict[str, Any] | None = None) -> None:
                         timeout=get_timeout("sudo"),
                     )
                 # If invalid, silently skip (user config still works)
-        
+
         # Reload systemd service
         systemctl_path = shutil.which("systemctl")
-        if systemctl_path and sudo_path:
+        if system_caddy.exists() and systemctl_path and sudo_path:
             is_valid_systemctl, _ = validate_executable(systemctl_path)
             is_valid_sudo, _ = validate_executable(sudo_path)
             if is_valid_systemctl and is_valid_sudo:
@@ -146,11 +146,19 @@ def edit_config() -> None:
             editor = "nano"
         else:
             editor = "vi"
-    
-    # Validate editor executable
-    is_valid, error = validate_executable(editor, check_writability=False)
+
+    resolved_editor = None
+    if editor:
+        editor_path = Path(editor)
+        if editor_path.exists():
+            resolved_editor = str(editor_path.resolve())
+        else:
+            resolved_editor = find_executable_in_path(editor) or shutil.which(editor)
+
+    # Validate editor executable (use resolved path when available)
+    is_valid, error = validate_executable(resolved_editor or editor, check_writability=False)
     if not is_valid:
         print(f"Warning: Editor validation failed: {error}")
         print("Attempting to open anyway...")
-    
-    subprocess.run([editor, str(config_file)], check=False, timeout=TIMEOUT_NONE)
+
+    subprocess.run([resolved_editor or editor, str(config_file)], check=False, timeout=TIMEOUT_NONE)

@@ -8,6 +8,7 @@ import logging
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -15,9 +16,9 @@ from fastapi.responses import JSONResponse, Response
 
 from devhost_cli import __version__
 from devhost_cli.router.cache import RouteCache
+from devhost_cli.router.connection_pool import create_http_client, get_pool_metrics, request_with_retry
 from devhost_cli.router.metrics import Metrics
 from devhost_cli.router.utils import extract_subdomain, load_domain, parse_target
-from devhost_cli.router.connection_pool import create_http_client, request_with_retry, get_pool_metrics
 
 # Optional SSRF protection (security module is available in v3; keep router usable if missing)
 try:
@@ -43,6 +44,7 @@ LOG_REQUESTS = os.getenv("DEVHOST_LOG_REQUESTS", "").lower() in {"1", "true", "y
 # Use structured logging setup if available
 try:
     from devhost_cli.structured_logging import setup_logging
+
     setup_logging()
 except ImportError:
     # Fallback to basic logging if structured logging not available
@@ -99,6 +101,7 @@ def create_app() -> FastAPI:
     # Validate configuration on startup
     try:
         from devhost_cli.config import validate_config
+
         is_valid, errors = validate_config()
         if not is_valid:
             logger.error("Config validation failed on startup:")
@@ -107,49 +110,79 @@ def create_app() -> FastAPI:
             logger.warning("Router will continue but some routes may not work correctly")
     except Exception as e:
         logger.warning("Config validation skipped due to error: %s", e)
-    
-    app = FastAPI()
-    route_cache = RouteCache()
-    metrics = Metrics()
-    
-    # Create shared HTTP client with optimized connection pooling
-    http_client = create_http_client()
-    
+
     # Track in-flight requests for graceful shutdown (Phase 4 L-19)
     in_flight_requests = set()
     shutdown_event_obj = asyncio.Event()
-    
-    @app.on_event("shutdown")
-    async def shutdown_handler():
-        """
-        Graceful shutdown handler (Phase 4 L-19).
-        
-        - Wait for in-flight requests to complete
-        - Close HTTP client connection pool
-        - Timeout after 30 seconds for forced shutdown
-        """
-        logger.info("Shutdown initiated...")
-        shutdown_event_obj.set()
-        
-        # Wait for in-flight requests with timeout
-        if in_flight_requests:
-            logger.info(f"Waiting for {len(in_flight_requests)} in-flight requests...")
-            timeout = 30.0  # 30 second timeout
-            start_wait = time.time()
-            
-            while in_flight_requests and (time.time() - start_wait) < timeout:
-                await asyncio.sleep(0.1)
-            
+    http_client = None
+
+    # Optional security headers middleware (opt-in via DEVHOST_SECURITY_HEADERS=1)
+    try:
+        from devhost_cli.router.security_headers import SecurityHeadersMiddleware, is_security_headers_enabled
+    except Exception:  # pragma: no cover - optional module
+        SecurityHeadersMiddleware = None  # type: ignore[assignment]  # noqa: N806
+        is_security_headers_enabled = None  # type: ignore[assignment]
+
+    # Certificate status checks on startup (non-fatal)
+    try:
+        from devhost_cli.certificates import log_certificate_status, should_verify_certificates
+    except Exception:  # pragma: no cover - optional module
+        log_certificate_status = None
+        should_verify_certificates = None
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        nonlocal http_client
+        if log_certificate_status:
+            log_certificate_status()
+        if should_verify_certificates and not should_verify_certificates():
+            logger.warning("DEVHOST_VERIFY_CERTS is disabled; TLS certificate verification is off.")
+
+        http_client = create_http_client()
+        try:
+            yield
+        finally:
+            logger.info("Shutdown initiated...")
+            shutdown_event_obj.set()
+
             if in_flight_requests:
-                logger.warning(
-                    f"Forced shutdown: {len(in_flight_requests)} requests did not complete in {timeout}s"
-                )
-            else:
-                logger.info("All in-flight requests completed")
-        
-        # Close HTTP client
-        await http_client.aclose()
-        logger.info("Shutdown complete")
+                logger.info(f"Waiting for {len(in_flight_requests)} in-flight requests...")
+                timeout = 30.0  # 30 second timeout
+                start_wait = time.time()
+
+                while in_flight_requests and (time.time() - start_wait) < timeout:
+                    await asyncio.sleep(0.1)
+
+                if in_flight_requests:
+                    logger.warning(
+                        f"Forced shutdown: {len(in_flight_requests)} requests did not complete in {timeout}s"
+                    )
+                else:
+                    logger.info("All in-flight requests completed")
+
+            if http_client:
+                await http_client.aclose()
+            logger.info("Shutdown complete")
+
+    app = FastAPI(lifespan=lifespan)
+
+    if SecurityHeadersMiddleware and is_security_headers_enabled:
+        try:
+            headers_enabled = is_security_headers_enabled()
+            app.add_middleware(SecurityHeadersMiddleware, enabled=headers_enabled)
+            if headers_enabled:
+                logger.info("Security headers middleware enabled")
+        except Exception as e:
+            logger.debug("Security headers middleware not available: %s", e)
+
+    route_cache = RouteCache()
+    metrics = Metrics()
+
+    def _get_http_client() -> httpx.AsyncClient:
+        nonlocal http_client
+        if http_client is None:
+            http_client = create_http_client()
+        return http_client
 
     @app.middleware("http")
     async def request_metrics(request: Request, call_next):
@@ -163,7 +196,7 @@ def create_app() -> FastAPI:
             subdomain = extract_subdomain(host_header, load_domain())
             start = time.time()
             response = await call_next(request)
-            
+
             # Record metrics with latency (Phase 4 L-17)
             duration_ms = (time.time() - start) * 1000
             metrics.record(subdomain, response.status_code, latency_ms=duration_ms)
@@ -189,7 +222,7 @@ def create_app() -> FastAPI:
     async def health():
         """
         Enhanced health endpoint for liveness and readiness checks (Phase 4 L-18).
-        
+
         Returns:
         - status: ok or shutting_down
         - version: router version
@@ -201,16 +234,17 @@ def create_app() -> FastAPI:
         """
         routes = await route_cache.get_routes()
         pool_metrics = get_pool_metrics()
-        
+
         # Get memory usage (optional, gracefully handle if not available)
         memory_mb = None
         try:
             import psutil
+
             process = psutil.Process()
             memory_mb = round(process.memory_info().rss / 1024 / 1024, 1)
         except Exception:
             pass  # psutil not available or failed
-        
+
         response_data = {
             "status": "shutting_down" if shutdown_event_obj.is_set() else "ok",
             "version": __version__,
@@ -222,10 +256,10 @@ def create_app() -> FastAPI:
                 "success_rate": pool_metrics.get("success_rate", 1.0),
             },
         }
-        
+
         if memory_mb is not None:
             response_data["memory_mb"] = memory_mb
-        
+
         return JSONResponse(response_data)
 
     @app.get("/metrics")
@@ -341,7 +375,7 @@ def create_app() -> FastAPI:
         logger.info("[%s] WebSocket connection: %s.%s -> %s", request_id, subdomain, base_domain, upstream_url)
 
         await websocket.accept()
-        
+
         # Track WebSocket connection (Phase 4 L-17)
         metrics.record_websocket_connected()
 
@@ -476,10 +510,10 @@ def create_app() -> FastAPI:
         headers = dict(request.headers)
         # remove host header so upstream sees correct host
         headers.pop("host", None)
-        
+
         try:
             proxy_resp = await request_with_retry(
-                http_client,
+                _get_http_client(),
                 method=request.method,
                 url=url,
                 headers=headers,
@@ -490,9 +524,7 @@ def create_app() -> FastAPI:
             logger.warning(
                 "[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc
             )
-            return JSONResponse(
-                {"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502
-            )
+            return JSONResponse({"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502)
 
         # Filter hop-by-hop headers
         excluded = {

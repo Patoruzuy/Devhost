@@ -54,3 +54,20 @@ As requested, I have performed a senior-level review of the Devhost repository. 
 
 ## Summary
 The codebase is healthy. The critical fixes I applied (Streaming & Connection Pooling) upgrade the router from "toy" status to a robust tool capable of handling real developer workloads (large uploads, many requests).
+
+
+# Devhost v3.0: Zero-Config Subdomain Routing & WebSocket Support
+## Mode 1: Gateway (Built-in Router)
+**The "Zero-Config" mode** — Just run your app, and Devhost handles the rest.
+
+
+• 1. Add an optional CLI command to generate a diagnostic bundle.
+  2. Support redaction rules with configurable patterns to protect sensitive data.
+  3. Implement size limits for diagnostic bundles to prevent overly large outputs.
+  4. Allow users to select specific logs or components to include in the bundle.
+  5. Include external configuration files only when explicitly opted in by the user.
+  6. Attach internal state snapshots for improved debugging context.
+  7. Integrate Git metadata (gitts) to capture repository state with diagnostics.
+  8. Develop a terminal user interface (TUI) for easier interactive diagnostics and configuration.
+  9. Enhance security by enforcing strict permission checks before bundling data.
+  10. Improve developer experience (DX) with clear feedback and progress indicators during bundle creation.

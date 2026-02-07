@@ -35,12 +35,11 @@ Devhost uses **two** user-owned files under `~/.devhost/`:
 - `proxy.py` + `caddy_lifecycle.py` — external/system proxy integration
 
 ### Router
-Devhost can run either router implementation:
+Devhost uses a single router implementation:
 
-- In-repo router (used when developing from this repo): `router/app.py`
-- Packaged router (used when installed via pip without the `router/` folder): `devhost_cli/router/core.py` (`--factory devhost_cli.router.core:create_app`)
+- Packaged router: `devhost_cli/router/core.py` (`--factory devhost_cli.router.core:create_app`)
 
-Both expose the same functional surface:
+The router exposes:
 
 - `GET /health`
 - `GET /metrics`

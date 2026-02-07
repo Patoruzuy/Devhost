@@ -154,6 +154,52 @@ def main():
     doctor_parser.add_argument("--windows", action="store_true")
     doctor_parser.add_argument("--fix", action="store_true")
 
+    # diagnostics command
+    diagnostics_parser = subparsers.add_parser("diagnostics", help="Export diagnostic bundle")
+    diagnostics_subparsers = diagnostics_parser.add_subparsers(dest="diagnostics_action", help="Diagnostics action")
+    diagnostics_preview = diagnostics_subparsers.add_parser("preview", help="Preview diagnostic bundle contents")
+    diagnostics_preview.add_argument("--no-state", action="store_true", help="Exclude state.yml")
+    diagnostics_preview.add_argument("--no-config", action="store_true", help="Exclude devhost.json and domain")
+    diagnostics_preview.add_argument("--no-proxy", action="store_true", help="Exclude proxy snippets")
+    diagnostics_preview.add_argument("--no-logs", action="store_true", help="Exclude logs")
+    diagnostics_preview.add_argument("--top", type=int, default=30, help="Show top N largest files (default: 30)")
+    diagnostics_preview.add_argument(
+        "--max-size",
+        help="Maximum bundle size (e.g. 50MB). Use 0 or --no-size-limit to disable.",
+    )
+    diagnostics_preview.add_argument("--no-size-limit", action="store_true", help="Disable size limit enforcement")
+    diagnostics_preview.add_argument("--redaction-file", help="Path to redaction config file")
+    preview_redact = diagnostics_preview.add_mutually_exclusive_group()
+    preview_redact.add_argument("--redact", action="store_true", help="Redact secrets in preview (default)")
+    preview_redact.add_argument("--no-redact", action="store_true", help="Disable redaction")
+
+    diagnostics_upload = diagnostics_subparsers.add_parser("upload", help="Prepare bundle and show upload steps")
+    diagnostics_upload.add_argument(
+        "--max-size",
+        help="Maximum bundle size (e.g. 50MB). Use 0 or --no-size-limit to disable.",
+    )
+    diagnostics_upload.add_argument("--no-size-limit", action="store_true", help="Disable size limit enforcement")
+    diagnostics_upload.add_argument("--redaction-file", help="Path to redaction config file")
+    upload_redact = diagnostics_upload.add_mutually_exclusive_group()
+    upload_redact.add_argument("--redact", action="store_true", help="Redact secrets in bundle (default)")
+    upload_redact.add_argument("--no-redact", action="store_true", help="Disable redaction")
+
+    diagnostics_export = diagnostics_subparsers.add_parser("export", help="Export diagnostic bundle")
+    diagnostics_export.add_argument("--output", "-o", help="Output path for bundle (.zip)")
+    diagnostics_export.add_argument("--no-state", action="store_true", help="Exclude state.yml")
+    diagnostics_export.add_argument("--no-config", action="store_true", help="Exclude devhost.json and domain")
+    diagnostics_export.add_argument("--no-proxy", action="store_true", help="Exclude proxy snippets")
+    diagnostics_export.add_argument("--no-logs", action="store_true", help="Exclude logs")
+    diagnostics_export.add_argument(
+        "--max-size",
+        help="Maximum bundle size (e.g. 50MB). Use 0 or --no-size-limit to disable.",
+    )
+    diagnostics_export.add_argument("--no-size-limit", action="store_true", help="Disable size limit enforcement")
+    diagnostics_export.add_argument("--redaction-file", help="Path to redaction config file")
+    redact_group = diagnostics_export.add_mutually_exclusive_group()
+    redact_group.add_argument("--redact", action="store_true", help="Redact secrets in bundle (default)")
+    redact_group.add_argument("--no-redact", action="store_true", help="Disable redaction")
+
     # fix-http command
     subparsers.add_parser("fix-http", help="Convert https mappings to http")
 
@@ -337,6 +383,54 @@ def main():
                 success = True
             else:
                 success = cli.doctor()
+        elif args.command == "diagnostics":
+            if args.diagnostics_action == "preview":
+                redact = True
+                if getattr(args, "no_redact", False):
+                    redact = False
+                success = cli.diagnostics_preview(
+                    include_state=not args.no_state,
+                    include_config=not args.no_config,
+                    include_proxy=not args.no_proxy,
+                    include_logs=not args.no_logs,
+                    redact=redact,
+                    top=args.top,
+                    redaction_file=Path(args.redaction_file) if args.redaction_file else None,
+                    size_limit=args.max_size,
+                    no_size_limit=args.no_size_limit,
+                )
+            elif args.diagnostics_action == "upload":
+                redact = True
+                if getattr(args, "no_redact", False):
+                    redact = False
+                success = cli.diagnostics_upload(
+                    redact=redact,
+                    redaction_file=Path(args.redaction_file) if args.redaction_file else None,
+                    size_limit=args.max_size,
+                    no_size_limit=args.no_size_limit,
+                )
+            elif args.diagnostics_action == "export":
+                redact = True
+                if getattr(args, "no_redact", False):
+                    redact = False
+                success = cli.diagnostics_export(
+                    output_path=args.output,
+                    include_state=not args.no_state,
+                    include_config=not args.no_config,
+                    include_proxy=not args.no_proxy,
+                    include_logs=not args.no_logs,
+                    redact=redact,
+                    redaction_file=Path(args.redaction_file) if args.redaction_file else None,
+                    size_limit=args.max_size,
+                    no_size_limit=args.no_size_limit,
+                )
+            else:
+                msg_info(
+                    "Usage: devhost diagnostics preview|export|upload [--output PATH] "
+                    "[--no-state|--no-config|--no-proxy|--no-logs] "
+                    "[--max-size SIZE|--no-size-limit] [--no-redact]"
+                )
+                success = True
         elif args.command == "fix-http":
             success = cli.fix_http()
         elif args.command == "info":

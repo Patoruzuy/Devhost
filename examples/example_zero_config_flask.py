@@ -2,7 +2,7 @@
 Zero-Config Flask Example (v2.3+)
 
 The simplest way to run a Flask app with Devhost subdomain support.
-Just one line: run_flask(app) - that's it!
+Just one line: runner.run(app) - that's it!
 
 Usage:
     # Install devhost with Flask and YAML support
@@ -27,7 +27,7 @@ Features:
 
 from flask import Flask, jsonify
 
-from devhost_cli.frameworks import run_flask
+from devhost_cli.runner import run
 
 # Create Flask app
 app = Flask(__name__)
@@ -64,4 +64,4 @@ if __name__ == "__main__":
     # 2. Register itself (e.g., myflask.localhost → 127.0.0.1:8000)
     # 3. Start the Flask development server
     # 4. Cleanup the route on exit
-    run_flask(app, name="myflask")
+    run(app, name="myflask")

@@ -83,10 +83,40 @@ devhost diagnostics export
 devhost diagnostics export --output ./devhost-diagnostics.zip
 devhost diagnostics export --no-logs --no-proxy
 devhost diagnostics export --no-redact
+devhost diagnostics export --max-size 50MB
+devhost diagnostics export --no-size-limit
 devhost diagnostics preview --no-logs --no-proxy
 devhost diagnostics preview --top 10
+devhost diagnostics preview --max-size 20MB
 devhost diagnostics upload
+devhost diagnostics export --redaction-file ./diagnostics-redaction.json
 ```
 
 By default, secrets in logs/config/state files are redacted in the bundle.
 Use `--no-redact` only when you explicitly need raw data.
+Bundles enforce a default size limit (200MB). Use `--max-size` to override or
+`--no-size-limit` to disable the cap.
+You can supply custom redaction patterns with `--redaction-file` or by creating
+`~/.devhost/diagnostics-redaction.json`.
+You may also set `DEVHOST_DIAGNOSTICS_REDACTION_FILE` to override the path.
+
+Example redaction file:
+
+```json
+{
+  "redaction": {
+    "include_defaults": true,
+    "patterns": [
+      {
+        "pattern": "custom_secret=[^\\s]+",
+        "replacement": "custom_secret=[REDACTED]"
+      },
+      {
+        "pattern": "(?i)apikey\\s*[:=]\\s*\\S+",
+        "replacement": "apikey=[REDACTED]",
+        "flags": "i"
+      }
+    ]
+  }
+}
+```

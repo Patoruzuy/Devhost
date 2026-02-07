@@ -11,7 +11,7 @@ Contains the custom widgets for the dashboard:
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal
-from textual.widgets import Button, DataTable, Label, Markdown, Static, TabbedContent, TabPane, Tree
+from textual.widgets import Button, DataTable, Input, Label, Markdown, Static, TabbedContent, TabPane, Tree
 
 from devhost_cli.state import StateConfig
 
@@ -47,7 +47,12 @@ class Sidebar(Static):
         self._system_node.add_leaf("Diagnostics")
         self._system_node.add_leaf("Settings")
 
-    def update_state(self, state: StateConfig, integrity_results: dict | None = None) -> None:
+    def update_state(
+        self,
+        state: StateConfig,
+        integrity_results: dict | None = None,
+        system_info: dict | None = None,
+    ) -> None:
         """Update sidebar with current state."""
         self._state = state
         banner = self.query_one("#ownership-banner", Static)
@@ -95,6 +100,22 @@ class Sidebar(Static):
                 self._integrity_node.add_leaf(f"⚠ {issues} issues")
             else:
                 self._integrity_node.add_leaf("✓ All OK")
+
+        # Update system info
+        self._system_node.remove_children()
+        info = system_info or {}
+        router_status = info.get("router_status", "unknown")
+        router_health = info.get("router_health", "unknown")
+        self._system_node.add_leaf(f"Router: {router_status}")
+        if info.get("router_pid"):
+            self._system_node.add_leaf(f"PID: {info['router_pid']}")
+        if info.get("router_uptime"):
+            self._system_node.add_leaf(f"Uptime: {info['router_uptime']}")
+        self._system_node.add_leaf(f"Health: {router_health}")
+        if info.get("last_probe"):
+            self._system_node.add_leaf(f"Last Probe: {info['last_probe']}")
+        self._system_node.add_leaf("Diagnostics")
+        self._system_node.add_leaf("Settings")
 
 
 class StatusGrid(Static):
@@ -279,6 +300,8 @@ class IntegrityPanel(Static):
         with Horizontal(id="integrity-actions"):
             yield Button("Accept (Overwrite)", id="integrity-accept", variant="success")
             yield Button("Stop Tracking", id="integrity-ignore", variant="warning")
+            yield Button("View Diff", id="integrity-diff", variant="default")
+            yield Button("Restore Backup", id="integrity-restore", variant="warning")
             yield Button("Cancel", id="integrity-cancel", variant="default")
         yield Static("Select a file to resolve drift.", id="integrity-help")
 
@@ -307,6 +330,20 @@ class IntegrityPanel(Static):
             self._resolve_selected("accept")
         elif event.button.id == "integrity-ignore":
             self._resolve_selected("ignore")
+        elif event.button.id == "integrity-diff":
+            if not self._selected_path:
+                if hasattr(self.app, "notify"):
+                    self.app.notify("Select a file to diff first.", severity="warning")
+                return
+            if hasattr(self.app, "show_integrity_diff"):
+                self.app.show_integrity_diff(self._selected_path)
+        elif event.button.id == "integrity-restore":
+            if not self._selected_path:
+                if hasattr(self.app, "notify"):
+                    self.app.notify("Select a file to restore first.", severity="warning")
+                return
+            if hasattr(self.app, "restore_integrity_backup"):
+                self.app.restore_integrity_backup(self._selected_path)
         elif event.button.id == "integrity-cancel":
             self._selected_path = None
             self._update_help("Resolution cancelled.")
@@ -365,17 +402,38 @@ class DetailsPane(Static):
         self._state: StateConfig | None = None
 
     def compose(self) -> ComposeResult:
+        with Horizontal(id="route-actions"):
+            yield Button("Open", id="route-open")
+            yield Button("Copy URL", id="route-copy-url")
+            yield Button("Copy Host", id="route-copy-host")
+            yield Button("Copy Upstream", id="route-copy-upstream")
         with TabbedContent():
             with TabPane("Flow", id="tab-flow"):
                 yield FlowDiagram(id="flow-diagram")
             with TabPane("Verify", id="tab-verify"):
                 yield Static("Select a route to verify", id="verify-content")
             with TabPane("Logs", id="tab-logs"):
-                yield Static("Log tailing coming soon...", id="logs-content")
+                yield Label("Filter:", classes="field-label")
+                yield Input(placeholder="Filter logs (case-insensitive)", id="logs-filter")
+                with Horizontal(id="logs-actions"):
+                    yield Button("Apply Filter", id="logs-filter-apply")
+                    yield Button("Clear Filter", id="logs-filter-clear")
+                    yield Button("Copy Visible", id="logs-copy")
+                yield Label("Levels:", classes="field-label")
+                with Horizontal(id="logs-levels"):
+                    yield Button("All", id="logs-level-all")
+                    yield Button("Info", id="logs-level-info")
+                    yield Button("Warn", id="logs-level-warn")
+                    yield Button("Error", id="logs-level-error")
+                yield Static("Shortcuts: 0=All, 1=Info, 2=Warn, 3=Error", id="logs-level-help")
+                yield Static("", id="logs-content")
             with TabPane("Config", id="tab-config"):
                 yield Markdown("", id="config-content")
                 with Horizontal(id="config-actions"):
                     yield Button("External Proxy...", id="external-proxy")
+                    yield Button("Export Diagnostics (Redacted)", id="export-diagnostics")
+                    yield Button("Export Diagnostics (Raw)", id="export-diagnostics-raw")
+                    yield Button("Preview Diagnostics", id="preview-diagnostics")
             with TabPane("Integrity", id="tab-integrity"):
                 yield IntegrityPanel(id="integrity-panel")
 
@@ -483,6 +541,71 @@ class DetailsPane(Static):
         integrity.update_integrity(integrity_state or state, integrity_results)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "route-open":
+            if hasattr(self.app, "action_open_url"):
+                self.app.action_open_url()
+        if event.button.id == "route-copy-url":
+            if hasattr(self.app, "action_copy_url"):
+                self.app.action_copy_url()
+        if event.button.id == "route-copy-host":
+            if hasattr(self.app, "action_copy_host"):
+                self.app.action_copy_host()
+        if event.button.id == "route-copy-upstream":
+            if hasattr(self.app, "action_copy_upstream"):
+                self.app.action_copy_upstream()
         if event.button.id == "external-proxy":
             if hasattr(self.app, "action_external_proxy"):
                 self.app.action_external_proxy()
+        if event.button.id == "export-diagnostics":
+            if hasattr(self.app, "export_diagnostics"):
+                self.app.export_diagnostics(redact=True)
+        if event.button.id == "export-diagnostics-raw":
+            if hasattr(self.app, "export_diagnostics"):
+                self.app.export_diagnostics(redact=False)
+        if event.button.id == "preview-diagnostics":
+            if hasattr(self.app, "action_preview_diagnostics"):
+                self.app.action_preview_diagnostics()
+        if event.button.id == "logs-filter-apply":
+            if hasattr(self.app, "set_log_filter"):
+                input_widget = self.query_one("#logs-filter", Input)
+                self.app.set_log_filter(input_widget.value)
+        if event.button.id == "logs-filter-clear":
+            if hasattr(self.app, "clear_log_filter"):
+                self.app.clear_log_filter()
+        if event.button.id == "logs-copy":
+            if hasattr(self.app, "copy_logs"):
+                self.app.copy_logs()
+        if event.button.id == "logs-level-all":
+            if hasattr(self.app, "set_log_levels"):
+                self.app.set_log_levels({"info", "warn", "error"})
+        if event.button.id == "logs-level-info":
+            if hasattr(self.app, "toggle_log_level"):
+                self.app.toggle_log_level("info")
+        if event.button.id == "logs-level-warn":
+            if hasattr(self.app, "toggle_log_level"):
+                self.app.toggle_log_level("warn")
+        if event.button.id == "logs-level-error":
+            if hasattr(self.app, "toggle_log_level"):
+                self.app.toggle_log_level("error")
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "logs-filter":
+            if hasattr(self.app, "set_log_filter"):
+                self.app.set_log_filter(event.value)
+
+    def update_log_level_buttons(self, active: set[str]) -> None:
+        try:
+            info_btn = self.query_one("#logs-level-info", Button)
+            warn_btn = self.query_one("#logs-level-warn", Button)
+            error_btn = self.query_one("#logs-level-error", Button)
+            all_btn = self.query_one("#logs-level-all", Button)
+        except Exception:
+            return
+
+        def _set(btn: Button, enabled: bool) -> None:
+            btn.variant = "success" if enabled else "default"
+
+        _set(info_btn, "info" in active)
+        _set(warn_btn, "warn" in active)
+        _set(error_btn, "error" in active)
+        _set(all_btn, active == {"info", "warn", "error"})

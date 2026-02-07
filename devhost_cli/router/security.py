@@ -11,8 +11,8 @@ logger = logging.getLogger("devhost.security")
 # https://datatracker.ietf.org/doc/html/rfc1035 (Section 2.3.4)
 # https://datatracker.ietf.org/doc/html/rfc1123 (Section 2.1)
 MAX_HOSTNAME_LENGTH = 253  # Maximum total hostname length (RFC 1035)
-MAX_LABEL_LENGTH = 63      # Maximum length of a single DNS label (RFC 1035)
-MAX_ROUTE_NAME_LENGTH = 63 # Maximum length for route/subdomain names (same as DNS label)
+MAX_LABEL_LENGTH = 63  # Maximum length of a single DNS label (RFC 1035)
+MAX_ROUTE_NAME_LENGTH = 63  # Maximum length for route/subdomain names (same as DNS label)
 
 # RFC 1918 private networks + link-local
 BLOCKED_NETWORKS = [
@@ -31,15 +31,23 @@ METADATA_HOSTNAMES = [
 VALID_SUBDOMAIN_PATTERN = re.compile(r"^(?!-)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)$", re.IGNORECASE)
 
 
+def _normalize_host_for_resolution(host: str) -> str:
+    if host.startswith("[") and host.endswith("]"):
+        return host[1:-1]
+    return host
+
+
 def validate_upstream_target(host: str, port: int) -> tuple[bool, str | None]:
     if os.getenv("DEVHOST_ALLOW_PRIVATE_NETWORKS", "").lower() in {"1", "true"}:
         return (True, None)
 
-    if host.lower() in METADATA_HOSTNAMES:
+    normalized_host = _normalize_host_for_resolution(host)
+
+    if normalized_host.lower() in METADATA_HOSTNAMES:
         return (False, f"Target {host} is a blocked metadata endpoint (SSRF protection)")
 
     try:
-        addr_info = socket.getaddrinfo(host, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+        addr_info = socket.getaddrinfo(normalized_host, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
     except Exception as e:
         logger.warning("Failed to resolve %s: %s", host, e)
         return (False, f"Cannot resolve hostname: {host}")
@@ -51,6 +59,20 @@ def validate_upstream_target(host: str, port: int) -> tuple[bool, str | None]:
         except ValueError:
             continue
 
+        if ip_obj.is_loopback:
+            continue
+
+        if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
+            mapped = ip_obj.ipv4_mapped
+            if mapped.is_loopback:
+                continue
+            if mapped.is_private or mapped.is_link_local:
+                logger.warning("Blocked private IPv4-mapped IP: %s (%s) from %s", mapped, ip_str, host)
+                return (
+                    False,
+                    f"Target {host} resolves to private IPv4-mapped IP {mapped} (SSRF protection). Use DEVHOST_ALLOW_PRIVATE_NETWORKS=1 to override.",
+                )
+
         for network in BLOCKED_NETWORKS:
             if ip_obj in network:
                 logger.warning("Blocked private IP: %s (%s) in %s", host, ip_str, network)
@@ -58,6 +80,13 @@ def validate_upstream_target(host: str, port: int) -> tuple[bool, str | None]:
                     False,
                     f"Target {host} resolves to private IP {ip_str} (SSRF protection). Use DEVHOST_ALLOW_PRIVATE_NETWORKS=1 to override.",
                 )
+
+        if ip_obj.is_private or ip_obj.is_link_local:
+            logger.warning("Blocked non-public IP: %s (%s)", host, ip_str)
+            return (
+                False,
+                f"Target {host} resolves to non-public IP {ip_str} (SSRF protection). Use DEVHOST_ALLOW_PRIVATE_NETWORKS=1 to override.",
+            )
 
     return (True, None)
 

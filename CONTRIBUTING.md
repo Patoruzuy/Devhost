@@ -1,6 +1,6 @@
 # Contributing to Devhost
 
-Thank you for your interest in contributing to Devhost! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to Devhost! This document provides guidelines and instructions for contributing. Please read through it carefully before submitting a pull request.
 
 ## Development Setup (Recommended)
 
@@ -30,7 +30,7 @@ python -m pip install -e ".[dev,all]"
 - Don’t use `pip install --user` inside a virtualenv (user site-packages are typically hidden).
 - Avoid `--no-build-isolation` unless you know you need it; if you use it, ensure `setuptools` is installed in the active environment.
 
-## Before Submitting a Pull Request
+## Before Submitting a Pull Request must meet the following requirements:
 
 ### 1. Run Linting
 
@@ -142,13 +142,13 @@ pip-audit --desc
 
 The weekly security scan generates SBOMs for supply chain transparency:
 
-- Download from [GitHub Actions artifacts](https://github.com/yourusername/devhost/actions/workflows/security-scan.yml)
+- Download from [GitHub Actions artifacts](https://github.com/Patoruzuy/devhost/actions/workflows/security-scan.yml)
 - `sbom-cyclonedx.json` - Machine-readable format for automated tools
 - `sbom-cyclonedx.xml` - Compliance documentation format
 
 **GitHub Actions security:**
 
-All GitHub Actions are pinned to commit SHAs to prevent supply chain attacks:
+CI and security-scan workflows are pinned to commit SHAs to reduce supply chain risk. The publish workflow still uses version tags and should be pinned before audit-critical releases.
 
 ```yaml
 # Example: pinned to specific commit
@@ -176,7 +176,7 @@ python -m pip install -e ".[dev,all]"
 # Start the router
 make start
 # OR
-uvicorn router.app:app --port 7777 --reload
+uvicorn devhost_cli.router.core:create_app --factory --port 7777 --reload
 
 # Test your changes
 devhost add myapp 8000

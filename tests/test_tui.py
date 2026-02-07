@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -331,13 +332,17 @@ class ExternalProxyActionTests(unittest.TestCase):
 class NextActionTests(unittest.TestCase):
     def test_next_action_apply_when_draft(self):
         fake_session = SimpleNamespace(has_changes=Mock(return_value=True), routes={}, proxy_mode="gateway")
-        fake_self = SimpleNamespace(session=fake_session, _integrity_results={}, state=SimpleNamespace(external_config_path=None))
+        fake_self = SimpleNamespace(
+            session=fake_session, _integrity_results={}, state=SimpleNamespace(external_config_path=None)
+        )
         msg = DevhostDashboard._compute_next_action(fake_self)
         self.assertIn("Apply", msg)
 
     def test_next_action_add_route_when_empty(self):
         fake_session = SimpleNamespace(has_changes=Mock(return_value=False), routes={}, proxy_mode="gateway")
-        fake_self = SimpleNamespace(session=fake_session, _integrity_results={}, state=SimpleNamespace(external_config_path=None))
+        fake_self = SimpleNamespace(
+            session=fake_session, _integrity_results={}, state=SimpleNamespace(external_config_path=None)
+        )
         msg = DevhostDashboard._compute_next_action(fake_self)
         self.assertIn("Add your first route", msg)
 
@@ -353,9 +358,82 @@ class NextActionTests(unittest.TestCase):
 
     def test_next_action_external_attach(self):
         fake_session = SimpleNamespace(has_changes=Mock(return_value=False), routes={"api": {}}, proxy_mode="external")
-        fake_self = SimpleNamespace(session=fake_session, _integrity_results={}, state=SimpleNamespace(external_config_path=None))
+        fake_self = SimpleNamespace(
+            session=fake_session, _integrity_results={}, state=SimpleNamespace(external_config_path=None)
+        )
         msg = DevhostDashboard._compute_next_action(fake_self)
         self.assertIn("Attach external proxy", msg)
+
+
+class DiagnosticsBundleActionTests(unittest.TestCase):
+    def test_action_export_diagnostics_runs_worker(self):
+        fake_self = SimpleNamespace(
+            notify=Mock(),
+            _export_diagnostics_worker=Mock(),
+            export_diagnostics=Mock(),
+        )
+        DevhostDashboard.action_export_diagnostics(fake_self)
+        fake_self.export_diagnostics.assert_called_once_with(redact=True)
+
+    def test_export_diagnostics_raw_uses_worker(self):
+        fake_self = SimpleNamespace(notify=Mock(), _export_diagnostics_worker=Mock())
+        DevhostDashboard.export_diagnostics(fake_self, redact=False)
+        fake_self._export_diagnostics_worker.assert_called_once_with(False)
+
+    def test_action_preview_diagnostics_runs_worker(self):
+        fake_self = SimpleNamespace(notify=Mock(), _preview_diagnostics_worker=Mock())
+        DevhostDashboard.action_preview_diagnostics(fake_self)
+        fake_self._preview_diagnostics_worker.assert_called_once()
+
+
+class LogFilterTests(unittest.TestCase):
+    def test_apply_log_filter(self):
+        fake_self = SimpleNamespace(_log_filter="error")
+        result = DevhostDashboard._apply_log_filter(fake_self, ["ok", "Error happened", "warning"])
+        self.assertEqual(result, ["Error happened"])
+
+    def test_copy_logs_uses_clipboard(self):
+        buffer = deque(["line1", "line2"], maxlen=200)
+        fake_self = SimpleNamespace(
+            selected_route="api",
+            _log_buffers={"api": buffer},
+            _log_filter="",
+            LOG_COPY_LINES=200,
+            notify=Mock(),
+            _apply_log_filter=lambda lines: lines,
+            _copy_to_clipboard=Mock(return_value=True),
+        )
+        DevhostDashboard.copy_logs(fake_self)
+        fake_self._copy_to_clipboard.assert_called_once()
+
+    def test_format_log_lines_highlight(self):
+        fake_self = SimpleNamespace(_log_filter="error")
+        formatted = DevhostDashboard._format_log_lines(fake_self, ["Error happened"])
+        self.assertIn("[reverse]", formatted[0])
+
+    def test_apply_log_levels_filters(self):
+        fake_self = SimpleNamespace(_log_levels={"error"})
+        lines = ["INFO boot", "ERROR failed", "warning maybe"]
+        result = DevhostDashboard._apply_log_levels(fake_self, lines)
+        self.assertEqual(result, ["ERROR failed"])
+
+    def test_toggle_log_level_multi(self):
+        fake_self = SimpleNamespace(
+            _log_levels={"info", "warn", "error"},
+            _refresh_logs_view=Mock(),
+            _update_log_level_buttons=Mock(),
+        )
+        DevhostDashboard.toggle_log_level(fake_self, "info")
+        self.assertNotIn("info", fake_self._log_levels)
+        DevhostDashboard.toggle_log_level(fake_self, "info")
+        self.assertIn("info", fake_self._log_levels)
+
+    def test_action_logs_level_all(self):
+        fake_self = SimpleNamespace(
+            set_log_levels=Mock(),
+        )
+        DevhostDashboard.action_logs_level_all(fake_self)
+        fake_self.set_log_levels.assert_called_once_with({"info", "warn", "error"})
 
 
 if __name__ == "__main__":

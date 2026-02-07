@@ -126,16 +126,23 @@ class TestDevhostWSGIMiddleware(unittest.TestCase):
         self.assertEqual(b"".join(result), b"Hello from app")
         start_response.assert_called_once()
 
-    @patch("devhost_cli.middleware.wsgi.requests.request")
-    def test_proxy_request_success(self, mock_request):
+    @patch("devhost_cli.middleware.wsgi.httpx.Client")
+    @patch("devhost_cli.router.security.validate_upstream_target")
+    def test_proxy_request_success(self, mock_validate, mock_client_class):
         """Test successful proxy request."""
+        # Mock SSRF validation to pass
+        mock_validate.return_value = (True, None)
+
         # Mock successful response
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.reason = "OK"
+        mock_response.reason_phrase = "OK"
         mock_response.headers = {"Content-Type": "application/json"}
         mock_response.content = b'{"message": "proxied"}'
-        mock_request.return_value = mock_response
+
+        mock_client = Mock()
+        mock_client.request.return_value = mock_response
+        mock_client_class.return_value = mock_client
 
         middleware = DevhostWSGIMiddleware(self.simple_app)
         middleware._routes = self.test_routes
@@ -154,8 +161,8 @@ class TestDevhostWSGIMiddleware(unittest.TestCase):
         result = middleware(environ, start_response)
 
         # Verify proxy was called
-        mock_request.assert_called_once()
-        call_args = mock_request.call_args
+        mock_client.request.assert_called_once()
+        call_args = mock_client.request.call_args
 
         # Verify URL
         self.assertEqual(call_args.kwargs["url"], "http://127.0.0.1:3000/api/test?foo=bar")
@@ -167,15 +174,22 @@ class TestDevhostWSGIMiddleware(unittest.TestCase):
         status_arg = start_response.call_args[0][0]
         self.assertEqual(status_arg, "200 OK")
 
-    @patch("devhost_cli.middleware.wsgi.requests.request")
-    def test_proxy_request_with_body(self, mock_request):
+    @patch("devhost_cli.middleware.wsgi.httpx.Client")
+    @patch("devhost_cli.router.security.validate_upstream_target")
+    def test_proxy_request_with_body(self, mock_validate, mock_client_class):
         """Test proxy request with request body."""
+        # Mock SSRF validation to pass
+        mock_validate.return_value = (True, None)
+
         mock_response = Mock()
         mock_response.status_code = 201
-        mock_response.reason = "Created"
+        mock_response.reason_phrase = "Created"
         mock_response.headers = {}
         mock_response.content = b""
-        mock_request.return_value = mock_response
+
+        mock_client = Mock()
+        mock_client.request.return_value = mock_response
+        mock_client_class.return_value = mock_client
 
         middleware = DevhostWSGIMiddleware(self.simple_app)
         middleware._routes = {"api": 8000}
@@ -195,15 +209,21 @@ class TestDevhostWSGIMiddleware(unittest.TestCase):
         middleware(environ, start_response)
 
         # Verify body was sent
-        call_args = mock_request.call_args
-        self.assertEqual(call_args.kwargs["data"], body_data)
+        call_args = mock_client.request.call_args
+        self.assertEqual(call_args.kwargs["content"], body_data)
 
-    @patch("devhost_cli.middleware.wsgi.requests.request")
-    def test_proxy_request_error(self, mock_request):
+    @patch("devhost_cli.middleware.wsgi.httpx.Client")
+    @patch("devhost_cli.router.security.validate_upstream_target")
+    def test_proxy_request_error(self, mock_validate, mock_client_class):
         """Test proxy request with connection error."""
-        from requests import RequestException
+        import httpx
 
-        mock_request.side_effect = RequestException("Connection refused")
+        # Mock SSRF validation to pass
+        mock_validate.return_value = (True, None)
+
+        mock_client = Mock()
+        mock_client.request.side_effect = httpx.ConnectError("Connection refused")
+        mock_client_class.return_value = mock_client
 
         middleware = DevhostWSGIMiddleware(self.simple_app)
         middleware._routes = {"api": 8000}

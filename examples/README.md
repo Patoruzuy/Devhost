@@ -1,103 +1,85 @@
 # Devhost Examples
 
-This directory contains example integrations showing different ways to use Devhost v3.0.
+This directory contains executable examples showing how to integrate Devhost v3.0 into various Python frameworks.
 
-## Quick Start
+## Why Integrate?
+While you can always use the `devhost add` CLI command manually, integration allows your app to:
+1. **Auto-register**: Automatically add its subdomain to Devhost on startup.
+2. **Find a Port**: Automatically find an available port if none is specified.
+3. **Start the Router**: Ensure the Devhost Gateway router is running.
 
-```bash
-# Install devhost
-pip install devhost
+---
 
-# Add a route
-devhost add myapp 8000
+## Integration Patterns
 
-# Access at:
-# http://myapp.localhost:7777  (Gateway mode - default)
-# http://myapp.localhost       (System mode - requires upgrade)
-```
-
-## Examples
-
-### 1. Zero-Config Flask (`example_zero_config_flask.py`)
-The simplest way to run Flask with subdomain support:
-
-```python
-from devhost_cli.frameworks import run_flask
-run_flask(app, name="myapp")  # → http://myapp.localhost:7777
-```
-
-**Run:** `python examples/example_zero_config_flask.py`
-
-### 2. Zero-Config FastAPI (`example_zero_config_fastapi.py`)
-Run FastAPI with auto-registration:
-
-```python
-from devhost_cli.frameworks import run_fastapi
-run_fastapi(app, name="myapi")  # → http://myapi.localhost:7777
-```
-
-**Run:** `python examples/example_zero_config_fastapi.py`
-
-### 3. Zero-Config Generic Runner (`example_zero_config_generic.py`)
-Auto-detects your framework and runs appropriately:
+### 1. The "Zero-Config" Runner (Recommended)
+This is the easiest way to wrap your existing application. It auto-detects if you're using Flask, FastAPI, or Django.
 
 ```python
 from devhost_cli.runner import run
-run(app)  # Auto-detects Flask, FastAPI, or Django
+
+# ... your app definition ...
+
+if __name__ == "__main__":
+    run(app, name="myapp")  # Accessible at http://myapp.localhost:7777
 ```
+**See**: `example_zero_config_generic.py`
 
-**Run:** `python examples/example_zero_config_generic.py`
+### 2. Framework-Specific Auto-Detection
+The runner automatically detects your framework and runs it appropriately.
 
-### 4. Flask-SocketIO (`example_flask_socketio.py`)
-Flask with WebSocket support via Flask-SocketIO:
+**Flask**:
+```python
+from devhost_cli.runner import run
+run(app, name="frontend")
+```
+**See**: `example_zero_config_flask.py`
+
+**FastAPI**:
+```python
+from devhost_cli.runner import run
+run(app, name="api")
+```
+**See**: `example_zero_config_fastapi.py`
+
+### 3. Middleware Integration
+Add Devhost logic directly into your app's middleware stack. This is useful for capturing requests before they hit your routes.
+
+```python
+from devhost_cli.middleware.asgi import DevhostMiddleware
+app.add_middleware(DevhostMiddleware)
+```
+**See**: `example_fastapi_middleware.py`
+
+### 4. WebSocket Support
+Devhost natively supports WebSockets. Here is how to use it with `Flask-SocketIO`.
 
 ```python
 from flask_socketio import SocketIO
-from devhost_cli.frameworks import run_flask
+from devhost_cli.runner import run
 
 socketio = SocketIO(app)
-run_flask(app, name="myapp", socketio=socketio)
+run(app, name="chat", socketio=socketio)
 ```
+**See**: `example_flask_socketio.py`
 
-**Run:** `python examples/example_flask_socketio.py`
+---
 
-### 5. Factory Function (`example_factory.py`)
-Create a complete Devhost app with the factory:
+## Running the Examples
 
-```python
-from devhost_cli.factory import create_devhost_app
-app = create_devhost_app()
-```
+1. **Install dependencies**:
+   ```bash
+   pip install flask fastapi uvicorn flask-socketio
+   pip install -e .
+   ```
 
-**Run:** `python examples/example_factory.py`
+2. **Run an example**:
+   ```bash
+   python examples/example_zero_config_flask.py
+   ```
 
-### 6. FastAPI Middleware (`example_fastapi_middleware.py`)
-Add Devhost routing to your existing FastAPI app:
-
-```python
-from devhost_cli.middleware.asgi import DevhostMiddleware
-app.add_middleware(DevhostMiddleware)
-```
-
-**Run:** `python examples/example_fastapi_middleware.py`
-
-### 7. Starlette Integration (`example_starlette.py`)
-Use Devhost with Starlette applications:
-
-```python
-from devhost_cli.middleware.asgi import DevhostMiddleware
-from starlette.applications import Starlette
-app.add_middleware(DevhostMiddleware)
-```
-
-**Run:** `python examples/example_starlette.py`
-
-### 8. Full Integration (`example_full_integration.py`)
-Combine factory functions with custom routes:
-
-```python
-from devhost_cli.factory import enable_subdomain_routing, create_proxy_router
-enable_subdomain_routing(app)
+3. **Check the Dashboard**:
+   Open a separate terminal and run `devhost dashboard` to see the route appear live.
 app.include_router(create_proxy_router())
 ```
 
@@ -171,16 +153,16 @@ python examples/example_zero_config_flask.py
 The `name` parameter determines **your app's subdomain**:
 
 ```python
-run_flask(app, name="myapp")     # → http://myapp.localhost:7777
-run_flask(app, name="api")       # → http://api.localhost:7777
-run_flask(app, name="frontend")  # → http://frontend.localhost:7777
+run(app, name="myapp")     # → http://myapp.localhost:7777
+run(app, name="api")       # → http://api.localhost:7777
+run(app, name="frontend")  # → http://frontend.localhost:7777
 ```
 
 ### Priority (highest to lowest):
 
 | Priority | Source | Example |
 |----------|--------|---------|
-| 1️⃣ | `name` parameter | `run_flask(app, name="myapi")` |
+| 1️⃣ | `name` parameter | `run(app, name="myapi")` |
 | 2️⃣ | `devhost.yml` file | `name: myapp` |
 | 3️⃣ | Directory name | Uses current folder name |
 

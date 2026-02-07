@@ -7,7 +7,10 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from router.app import app, extract_subdomain
+from devhost_cli.router.core import create_app
+from devhost_cli.router.utils import extract_subdomain
+
+app = create_app()
 
 
 class DummyRequest:
@@ -141,7 +144,7 @@ class RouterTests(unittest.TestCase):
         os.environ["DEVHOST_CONFIG"] = path
         DummyAsyncClient.captured = None
         try:
-            with patch("router.app.httpx.AsyncClient", DummyAsyncClient):
+            with patch("devhost_cli.router.core.httpx.AsyncClient", DummyAsyncClient):
                 resp = self.client.get("/hello?x=1", headers={"host": "hello.localhost"})
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.text, "ok")

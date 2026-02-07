@@ -37,7 +37,7 @@ Key Concepts:
 from flask import Flask, render_template_string
 from flask_socketio import SocketIO, emit
 
-from devhost_cli.frameworks import run_flask
+from devhost_cli.runner import run
 
 # Create Flask app
 app = Flask(__name__)
@@ -117,17 +117,17 @@ if __name__ == "__main__":
     # ============================================================
     #
     # Examples:
-    #   run_flask(app, name="myapp", socketio=socketio)     → http://myapp.localhost:8000
-    #   run_flask(app, name="api", socketio=socketio)       → http://api.localhost:8000
-    #   run_flask(app, name="frontend", socketio=socketio)  → http://frontend.localhost:8000
-    #   run_flask(app, name="sysgrow", socketio=socketio)   → http://sysgrow.localhost:8000
+    #   run(app, name="myapp", socketio=socketio)     → http://myapp.localhost:8000
+    #   run(app, name="api", socketio=socketio)       → http://api.localhost:8000
+    #   run(app, name="frontend", socketio=socketio)  → http://frontend.localhost:8000
+    #   run(app, name="sysgrow", socketio=socketio)   → http://sysgrow.localhost:8000
     #
     # The name does NOT need to match devhost.yml - it overrides it!
     # If you omit name, it will use:
     #   1. The 'name' field from devhost.yml (if exists)
     #   2. The current directory name (fallback)
     #
-    run_flask(
+    run(
         app,
         name="socketio-demo",  # ← This becomes the subdomain
         socketio=socketio,  # ← Required for WebSocket support

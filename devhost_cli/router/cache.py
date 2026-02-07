@@ -15,7 +15,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
 
 logger = logging.getLogger("devhost.router.cache")
 
@@ -76,7 +76,7 @@ def _select_config_path() -> Path | None:
 class RouteCache:
     """
     Cache for route configuration with automatic reload on file changes.
-    
+
     Enhanced features (Phase 4 L-15):
     - TTL-based expiration for cached routes
     - Hit/miss metrics tracking
@@ -93,18 +93,16 @@ class RouteCache:
         self._last_path: Path | None = None
         self._last_cache_time: float = 0.0
         self._lock = asyncio.Lock()
-        
+
         self.route_ttl = route_ttl
         self.config_ttl = config_ttl
-        
+
         # Metrics (Phase 4 L-15)
         self._cache_hits = 0
         self._cache_misses = 0
         self._reloads = 0
-        
-        logger.info(
-            f"Route cache initialized: route_ttl={route_ttl}s, config_ttl={config_ttl}s"
-        )
+
+        logger.info(f"Route cache initialized: route_ttl={route_ttl}s, config_ttl={config_ttl}s")
 
     async def get_routes(self) -> dict[str, int]:
         """
@@ -116,10 +114,10 @@ class RouteCache:
         # Check TTL expiration (Phase 4 L-15)
         cache_age = time.time() - self._last_cache_time
         ttl_expired = cache_age > self.config_ttl
-        
+
         if ttl_expired:
             logger.debug(f"Config cache TTL expired ({cache_age:.1f}s > {self.config_ttl}s)")
-        
+
         path = _select_config_path()
         if not path:
             async with self._lock:
@@ -131,7 +129,7 @@ class RouteCache:
                     self._last_cache_time = 0.0
                     self._cache_misses += 1
             return {}
-        
+
         try:
             mtime = path.stat().st_mtime
         except Exception as exc:
@@ -140,12 +138,8 @@ class RouteCache:
             return self._routes
 
         # Reload if: path changed, file modified, or TTL expired
-        needs_reload = (
-            self._last_path != path
-            or mtime > self._last_mtime
-            or ttl_expired
-        )
-        
+        needs_reload = self._last_path != path or mtime > self._last_mtime or ttl_expired
+
         if needs_reload:
             async with self._lock:
                 try:
@@ -154,11 +148,11 @@ class RouteCache:
                     logger.warning("Failed to stat config file %s: %s", path, exc)
                     self._cache_misses += 1
                     return self._routes
-                
+
                 # Double-check after acquiring lock
                 cache_age = time.time() - self._last_cache_time
                 ttl_expired = cache_age > self.config_ttl
-                
+
                 if self._last_path != path or mtime > self._last_mtime or ttl_expired:
                     loaded = _load_routes_from_path(path)
                     if loaded is None:
@@ -172,30 +166,32 @@ class RouteCache:
                             "Loaded %d routes from %s (reason: %s)",
                             len(self._routes),
                             path,
-                            "path_change" if self._last_path != path
-                            else "modified" if mtime > self._last_mtime
-                            else "ttl_expired"
+                            "path_change"
+                            if self._last_path != path
+                            else "modified"
+                            if mtime > self._last_mtime
+                            else "ttl_expired",
                         )
                     self._last_mtime = mtime
                     self._last_path = path
         else:
             # Cache hit (Phase 4 L-15)
             self._cache_hits += 1
-        
+
         return self._routes
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """
         Get cache metrics (Phase 4 L-15).
-        
+
         Returns:
             Dict with cache statistics including hit rate
         """
         total_requests = self._cache_hits + self._cache_misses
         hit_rate = self._cache_hits / total_requests if total_requests > 0 else 0.0
-        
+
         cache_age = time.time() - self._last_cache_time if self._last_cache_time > 0 else 0.0
-        
+
         return {
             "cache_hits": self._cache_hits,
             "cache_misses": self._cache_misses,
@@ -206,7 +202,7 @@ class RouteCache:
             "ttl_seconds": self.config_ttl,
             "config_path": str(self._last_path) if self._last_path else None,
         }
-    
+
     def invalidate(self):
         """Invalidate the cache (useful for testing or forced reload)."""
         self._last_cache_time = 0.0
