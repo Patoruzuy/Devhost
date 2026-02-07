@@ -73,7 +73,7 @@ format: install-dev
 	$(PYTHON) -m ruff format .
 
 # Start router (requires installation)
-start:
+start: install
 	$(PYTHON) -m devhost_cli.main start
 
 # Launch TUI dashboard

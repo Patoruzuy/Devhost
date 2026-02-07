@@ -48,6 +48,16 @@ devhost list
   ```
   *(Requires one-time admin permission to bind port 80/443.)*
 
+- **LAN Access (opt-in)**: Let other devices on your network reach Devhost.
+  ```bash
+  devhost proxy expose --lan
+  # or bind to a specific interface
+  devhost proxy expose --iface 192.168.1.10
+  # roll back to localhost-only
+  devhost proxy expose --local
+  ```
+  Then restart the router: `devhost stop && devhost start`. In System mode, also run `devhost proxy reload`.
+
 - **Dashboard**: Try the interactive TUI if you installed the `[tui]` extra:
   ```bash
   devhost dashboard

@@ -70,4 +70,136 @@ The codebase is healthy. The critical fixes I applied (Streaming & Connection Po
   7. Integrate Git metadata (gitts) to capture repository state with diagnostics.
   8. Develop a terminal user interface (TUI) for easier interactive diagnostics and configuration.
   9. Enhance security by enforcing strict permission checks before bundling data.
-  10. Improve developer experience (DX) with clear feedback and progress indicators during bundle creation.
+  10. Improve developer experience (DX) with
+  
+
+
+
+  Documentation polish: Add more examples, API docs
+Community building: Share on Reddit, HN, Twitter
+Medium Term (Next month)
+Phase 8: Advanced features (health checks, logging, WebSocket)
+Performance testing: Benchmark with ab/wrk
+Production guide: Deploy to cloud (DigitalOcean, AWS)
+Long Term (3+ months)
+Phase 10: Enterprise features (rate limiting, observability)
+Plugin system: Allow custom middleware/extensions
+Web UI: Browser-based route management
+💡 Additional Enhancement Ideas
+Docker Compose templates - Pre-configured multi-service setups
+Kubernetes support - Ingress controller alternative
+Service discovery - Auto-detect running services
+Browser extension - Quick route management from toolbar
+VS Code extension - Manage routes from editor
+Homebrew formula - Easy macOS installation
+Snap package - Easy Linux installation
+Chocolatey package - Easy Windows installation
+Template projects - Starter kits (fastapi-devhost, flask-devhost)
+
+Option 1 (Strong): Local Dev Service Discovery via DNS + Reverse Proxy
+
+Working title: DNS-based service discovery and routing for multi-service local development environments
+
+Problem: Local dev stacks (Docker Compose, microservices, multiple repos) rely on ad-hoc ports, hosts-file hacks, and fragile naming. When things move, dev breaks.
+
+Artefact you build (deliverable):
+
+A local DNS layer (e.g., CoreDNS/dnsmasq integration, or a small custom DNS responder) + a reverse proxy controller that maps:
+
+api.dev.test → http://127.0.0.1:49152
+
+web.dev.test → http://127.0.0.1:5173
+
+A policy/config model + UI/CLI to manage mappings and health.
+
+Evaluation (what makes it dissertation-grade):
+
+Compare approaches: hosts file vs dnsmasq/CoreDNS vs “just ports”.
+
+Measure:
+
+Time-to-working-environment (setup time)
+
+Failure rate under change (container restart, port changes)
+
+Dev ergonomics (mini user study / SUS-style questionnaire)
+
+Latency overhead of proxy/DNS (light benchmarking)
+
+This aligns nicely with systematic lifecycle + evaluation expectations. 
+
+Choosing a Lifecycle Model
+
+Option 2 (Strong): Port Conflict Resilience + Automatic Port Allocation
+
+Working title: Automated port allocation and conflict mitigation for developer machines running concurrent services
+
+Problem: Port collisions are constant (Node/Vite, Postgres, Redis, multiple Docker stacks). People waste time hunting conflicts and editing configs.
+
+Artefact you build:
+
+A port broker service + agent that:
+
+Detects conflicts (cross-platform)
+
+Allocates ports deterministically (per project/service)
+
+Writes back configuration (env files / compose overrides / runtime proxy routes)
+
+Optional: “sticky ports” + leases + rollback.
+
+Evaluation:
+
+Simulation + real-world tests across a few sample stacks:
+
+Number of conflicts detected/resolved
+
+Mean time to fix
+
+Stability across restarts
+
+Complexity added vs benefit
+
+This gives you algorithmic depth + very measurable outcomes.
+
+Option 3 (Security-leaning, still safe): Local TLS Termination + Certificate UX for Dev Proxies
+
+Working title: Improving TLS usability and trust management in local development reverse proxies
+
+Problem: Local HTTPS is painful (certs, trust stores, per-domain certs, browser warnings). Teams either avoid TLS locally or do inconsistent hacks.
+
+Artefact you build:
+
+A Devhost-compatible certificate manager + proxy TLS termination workflow:
+
+Automated cert issuance for *.dev.test
+
+Trust-store installation guidance/automation
+
+Per-service HTTPS routing with minimal friction
+
+Evaluation:
+
+Reduction in setup steps + user friction
+
+Compatibility matrix (Chrome/Firefox, Windows/macOS/Linux)
+
+Security posture discussion (threat model for dev machines)
+
+Option 4 (Networking angle): Reverse Proxy Behaviour Under Degraded Local Networks
+
+Working title: Reliability of local routing/proxy mechanisms under constrained or degraded connectivity
+
+Problem: Even “local dev” can suffer: VPN toggles, DNS changes, split tunnelling, corporate proxies, captive portals.
+
+Artefact you build:
+
+A test harness that introduces controlled “bad conditions” + a proxy/DNS setup (Devhost component).
+
+Fallback strategies (cached resolution, health-based routing, circuit-breaker-like behaviour).
+
+Evaluation:
+
+Availability / error rate / recovery time across scenarios
+
+Comparison of proxy stacks (e.g., Caddy vs Nginx vs Traefik, if you choose)

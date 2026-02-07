@@ -9,8 +9,13 @@ This file is the "Brain" of Devhost. It tracks the current operational mode and 
 ### Key Fields
 
 - **`proxy.mode`**: One of `off`, `gateway`, `system`, or `external`.
-- **`proxy.gateway.listen`**: The address the router binds to (default `127.0.0.1:7777`).
-- **`routes`**: A mirror of active routes, including metadata like `tags`, `enabled` status, and custom `domain` overrides.
+- **`proxy.gateway.listen`**: The address the router binds to (default `127.0.0.1:7777`). Prefer `devhost proxy expose --local|--lan|--iface <ip>` to change this safely.
+- **`proxy.system.listen_http`**: HTTP bind address for System mode (default `127.0.0.1:80`).
+- **`proxy.system.listen_https`**: HTTPS bind address for System mode (default `127.0.0.1:443`).
+- **`proxy.external.driver`**: External proxy driver (`caddy`, `nginx`, `traefik`).
+- **`proxy.external.config_path`**: Attached external proxy config path (if any).
+- **`routes`**: A mirror of active routes, including metadata like `tags`, `enabled` status, custom `domain` overrides, and optional `upstreams`.
+- **`routes.*.upstreams`**: Optional list of upstreams for External mode exports (`tcp`, `lan`, `docker`, `unix`).
 - **`integrity.hashes`**: A map of SHA-256 hashes for all Devhost-managed files.
 
 ### Why a separate state file?
@@ -32,6 +37,8 @@ This is the "Source of Truth" for the actual mappings. By default, it lives in `
 - **Integer**: Interpreted as `http://127.0.0.1:PORT`.
 - **String (Host:Port)**: Interpreted as `http://HOST:PORT`.
 - **String (Full URL)**: Preserves the specified scheme (e.g., `https://...`).
+
+Note: Multi-upstream definitions are stored in `~/.devhost/state.yml` and the optional lockfile, not in `devhost.json`. Gateway/System modes always use the primary target.
 
 ## 3. Project Config: `devhost.yml`
 
@@ -68,6 +75,7 @@ When you use the `devhost_cli.runner.run()` helper, it will automatically:
 ~/.devhost/
 ├── state.yml           # Global state & mode
 ├── devhost.json        # Global routes
+├── devhost.lock.json   # Optional lockfile (External mode)
 ├── domain              # Active base domain name
 ├── logs/               # Router and tunnel logs
 ├── backups/            # Backups created before attaching snippets
@@ -76,4 +84,3 @@ When you use the `devhost_cli.runner.run()` helper, it will automatically:
     ├── nginx/
     └── traefik/
 ```
-

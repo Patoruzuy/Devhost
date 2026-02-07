@@ -23,6 +23,7 @@ Comprehensive documentation for Devhost — zero-friction local development rout
 - **[Security Guide](security-configuration.md)** — Security features, best practices, and configuration
 - **[Performance & Optimization](performance.md)** — Tuning for high-traffic and production-like testing
 - **[Architecture](architecture.md)** — How Devhost works under the hood
+- **[TUI Architecture](tui-architecture.md)** — Dashboard module design and internals
 - **[Publishing & Releases](publishing.md)** — Release process and versioning
 
 ## Contributing

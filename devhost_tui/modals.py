@@ -7,17 +7,16 @@ Contains modal screens for:
 - ExternalProxyModal: Attach/detach external proxy configs
 """
 
+import ipaddress
 from pathlib import Path
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
+from textual.widgets import Button, Input, Label, Markdown, RadioButton, RadioSet, Static
 
-from devhost_cli.state import StateConfig
-from devhost_cli.validation import parse_target, validate_name
-
-from .scanner import ListeningPort, format_port_list
+from devhost_cli.state import StateConfig, parse_listen
 
 
 class ExternalProxyModal(ModalScreen[bool]):
@@ -29,7 +28,9 @@ class ExternalProxyModal(ModalScreen[bool]):
     }
 
     #external-dialog {
-        width: 90;
+        width: 85%;
+        max-width: 90;
+        min-width: 50;
         height: auto;
         border: thick $primary;
         background: $surface;
@@ -59,6 +60,18 @@ class ExternalProxyModal(ModalScreen[bool]):
     #external-buttons Button {
         margin: 0 1;
     }
+
+    #external-buttons-secondary,
+    #external-buttons-tertiary {
+        margin-top: 1;
+        width: 100%;
+        align: right middle;
+    }
+
+    #external-buttons-secondary Button,
+    #external-buttons-tertiary Button {
+        margin: 0 1;
+    }
     """
 
     def __init__(self):
@@ -77,14 +90,25 @@ class ExternalProxyModal(ModalScreen[bool]):
             )
             yield Label("Config Path (optional):")
             yield Input(placeholder="e.g., /etc/nginx/nginx.conf", id="config-path")
+            yield Label("Lockfile Path (optional):")
+            yield Input(placeholder="e.g., ~/.devhost/devhost.lock.json", id="lock-path")
             yield Static("Discover a config file to prefill the path.", id="discover-results")
+            yield Static("", id="action-results")
             yield Static("Reload hint will appear here.", id="reload-hint")
             with Horizontal(id="external-buttons"):
                 yield Button("Discover", variant="default", id="discover")
                 yield Button("Export Snippet", variant="primary", id="export")
                 yield Button("Attach", variant="success", id="attach")
                 yield Button("Detach", variant="warning", id="detach")
+            with Horizontal(id="external-buttons-secondary"):
+                yield Button("Drift Check", variant="default", id="drift")
+                yield Button("Accept Drift", variant="warning", id="drift-accept")
+                yield Button("Validate", variant="default", id="validate")
                 yield Button("Show Reload Hint", variant="default", id="reload")
+            with Horizontal(id="external-buttons-tertiary"):
+                yield Button("Write Lock", variant="default", id="lock-write")
+                yield Button("Apply Lock", variant="primary", id="lock-apply")
+                yield Button("Sync Once", variant="default", id="sync-once")
                 yield Button("Close", variant="default", id="close")
 
     def on_mount(self) -> None:
@@ -132,9 +156,18 @@ class ExternalProxyModal(ModalScreen[bool]):
         state = getattr(self.app, "state", None) or StateConfig()
         return state.external_config_path
 
+    def _get_lock_path(self) -> Path | None:
+        lock_input = self.query_one("#lock-path", Input)
+        value = lock_input.value.strip()
+        return Path(value) if value else None
+
     def _update_discover_text(self, message: str) -> None:
         discover = self.query_one("#discover-results", Static)
         discover.update(message)
+
+    def _update_action_text(self, message: str) -> None:
+        results = self.query_one("#action-results", Static)
+        results.update(message)
 
     def _update_reload_hint(self, message: str) -> None:
         hint = self.query_one("#reload-hint", Static)
@@ -164,13 +197,30 @@ class ExternalProxyModal(ModalScreen[bool]):
             self.app.action_integrity_check()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        from devhost_cli.proxy import attach_to_config, detach_from_config, discover_proxy_config, export_snippets
+        from devhost_cli.proxy import (
+            accept_proxy_drift,
+            apply_lockfile,
+            attach_to_config,
+            check_proxy_drift,
+            detach_from_config,
+            discover_proxy_config,
+            export_snippets,
+            sync_proxy,
+            validate_proxy_config,
+            write_lockfile,
+        )
 
         if event.button.id == "close":
             self.dismiss(False)
             return
 
         driver = self._selected_driver()
+        lock_path = self._get_lock_path()
+        use_lock = lock_path is not None
+        if event.button.id in {"export", "attach", "sync-once", "lock-apply"}:
+            if use_lock and lock_path and not lock_path.exists():
+                self._update_action_text(f"Lockfile not found: {lock_path}")
+                return
 
         if event.button.id == "discover":
             results = discover_proxy_config(driver)
@@ -194,10 +244,11 @@ class ExternalProxyModal(ModalScreen[bool]):
 
         if event.button.id == "export":
             state = getattr(self.app, "state", None) or StateConfig()
-            exported = export_snippets(state, [driver])
+            exported = export_snippets(state, [driver], use_lock=use_lock, lock_path=lock_path)
             snippet_path = exported.get(driver)
             if snippet_path:
                 self.app.notify(f"Snippet exported: {snippet_path}", severity="information")
+                self._update_action_text(f"Exported snippet: {snippet_path}")
             self._refresh_state()
             return
 
@@ -209,8 +260,11 @@ class ExternalProxyModal(ModalScreen[bool]):
                 self.app.notify("Config path required for attach.", severity="error")
                 return
             state = getattr(self.app, "state", None) or StateConfig()
-            success, msg = attach_to_config(state, config_path, driver)
+            success, msg = attach_to_config(
+                state, config_path, driver, validate=True, use_lock=use_lock, lock_path=lock_path
+            )
             self.app.notify(msg, severity="information" if success else "error")
+            self._update_action_text(msg)
             if success:
                 self._refresh_state()
             return
@@ -225,13 +279,83 @@ class ExternalProxyModal(ModalScreen[bool]):
             state = getattr(self.app, "state", None) or StateConfig()
             success, msg = detach_from_config(state, config_path)
             self.app.notify(msg, severity="information" if success else "error")
+            self._update_action_text(msg)
             if success:
                 self._refresh_state()
+            return
+
+        if event.button.id == "drift":
+            state = getattr(self.app, "state", None) or StateConfig()
+            config_path = self._get_config_path()
+            report = check_proxy_drift(state, driver, config_path, validate=False)
+            if report.get("ok"):
+                msg = "No drift detected."
+            else:
+                lines = ["Drift detected:"]
+                for issue in report.get("issues", []):
+                    code = issue.get("code", "unknown")
+                    message = issue.get("message", "")
+                    fix = issue.get("fix")
+                    line = f"- {code}: {message}"
+                    if fix:
+                        line += f" (fix: {fix})"
+                    lines.append(line)
+                msg = "\n".join(lines)
+            self._update_action_text(msg)
+            return
+
+        if event.button.id == "drift-accept":
+            state = getattr(self.app, "state", None) or StateConfig()
+            config_path = self._get_config_path()
+            success, msg = accept_proxy_drift(state, driver, config_path)
+            self.app.notify(msg, severity="information" if success else "error")
+            self._update_action_text(msg)
+            if success:
+                self._refresh_state()
+            return
+
+        if event.button.id == "validate":
+            config_path = self._get_config_path()
+            if not config_path:
+                self._update_action_text("Config path required for validation.")
+                return
+            ok, msg = validate_proxy_config(driver, config_path)
+            self._update_action_text(f"Validation {'OK' if ok else 'FAILED'}: {msg}")
+            return
+
+        if event.button.id == "lock-write":
+            state = getattr(self.app, "state", None) or StateConfig()
+            path = write_lockfile(state, lock_path)
+            msg = f"Lockfile written: {path}"
+            self.app.notify(msg, severity="information")
+            self._update_action_text(msg)
+            return
+
+        if event.button.id == "lock-apply":
+            if not self._guard_pending_changes():
+                return
+            state = getattr(self.app, "state", None) or StateConfig()
+            success, msg = apply_lockfile(state, lock_path, update_config=True)
+            self.app.notify(msg, severity="information" if success else "error")
+            self._update_action_text(msg)
+            if success:
+                self._refresh_state()
+            return
+
+        if event.button.id == "sync-once":
+            state = getattr(self.app, "state", None) or StateConfig()
+            sync_proxy(state, driver, watch=False, use_lock=use_lock, lock_path=lock_path)
+            self._update_action_text("Sync complete.")
+            self._refresh_state()
             return
 
 
 class DiagnosticsPreviewModal(ModalScreen[bool]):
     """Preview diagnostic bundle contents."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close", show=True),
+    ]
 
     CSS = """
     DiagnosticsPreviewModal {
@@ -239,7 +363,9 @@ class DiagnosticsPreviewModal(ModalScreen[bool]):
     }
 
     #diagnostics-preview {
-        width: 90;
+        width: 90%;
+        max-width: 100;
+        min-width: 60;
         height: auto;
         max-height: 30;
         border: thick $primary;
@@ -302,7 +428,75 @@ class DiagnosticsPreviewModal(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "diagnostics-preview-close":
-            self.dismiss(True)
+            self.dismiss()
+
+
+class QRCodeModal(ModalScreen[None]):
+    """Shows QR code for a route with domain details."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close", show=True),
+    ]
+
+    CSS = """
+    QRCodeModal {
+        align: center middle;
+    }
+
+    QRCodeModal > Container {
+        width: 85%;
+        max-width: 100;
+        min-width: 60;
+        height: auto;
+        background: $surface;
+        border: thick $primary;
+        padding: 2;
+    }
+
+    QRCodeModal Static {
+        padding: 1;
+    }
+    """
+
+    def __init__(self, route_name: str, url: str):
+        super().__init__()
+        self.route_name = route_name
+        self.url = url
+
+    def compose(self) -> ComposeResult:
+        qr_text = None
+        lan_ip = None
+        error_msg = None
+
+        try:
+            from devhost_cli.features import generate_qr_code, get_lan_ip
+
+            lan_ip = get_lan_ip()
+            qr_text = generate_qr_code(self.url, quiet=True)
+        except ImportError:
+            error_msg = "[yellow]QR code unavailable. Install with: pip install 'devhost[qr]'[/yellow]"
+        except Exception as e:
+            error_msg = f"[red]QR generation error: {str(e)}[/red]"
+
+        mobile_url = self.url.replace("localhost", lan_ip) if lan_ip else self.url
+
+        with Container():
+            yield Static(f"[bold cyan]Route:[/] {self.route_name}", id="route-name")
+            yield Static(f"[bold]URL:[/] {self.url}")
+            if lan_ip:
+                yield Static(f"[bold]Mobile:[/] {mobile_url}")
+            yield Static("")  # spacer
+            if error_msg:
+                yield Static(error_msg)
+            elif qr_text:
+                yield Static(qr_text, id="qr-code")
+            else:
+                yield Static("[yellow]QR code generation returned empty result[/yellow]")
+            yield Static("")
+            yield Button("Close", variant="primary", id="close-btn")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss()
 
 
 class IntegrityDiffModal(ModalScreen[bool]):
@@ -314,7 +508,9 @@ class IntegrityDiffModal(ModalScreen[bool]):
     }
 
     #integrity-diff {
-        width: 100;
+        width: 90%;
+        max-width: 100;
+        min-width: 60;
         height: auto;
         max-height: 30;
         border: thick $primary;
@@ -413,6 +609,199 @@ class ConfirmReloadModal(ModalScreen[bool]):
             self.dismiss(True)
 
 
+class ConfirmProxyExposeModal(ModalScreen[bool]):
+    """Confirm exposing Devhost on the LAN."""
+
+    CSS = """
+    ConfirmProxyExposeModal {
+        align: center middle;
+    }
+
+    #expose-dialog {
+        width: 70;
+        height: auto;
+        border: thick $warning;
+        background: $surface;
+        padding: 2;
+    }
+
+    #expose-dialog Label {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #expose-buttons {
+        margin-top: 2;
+        width: 100%;
+        align: right middle;
+    }
+
+    #expose-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, target: str, parent: ModalScreen | None = None):
+        super().__init__()
+        self._target = target
+        self._parent = parent
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="expose-dialog"):
+            yield Label("[b]Confirm LAN Exposure[/b]")
+            yield Label(f"Target bind: {self._target}")
+            yield Label("[yellow]This makes Devhost reachable from other devices on your network.[/yellow]")
+            yield Label("Rollback: devhost proxy expose --local")
+            with Horizontal(id="expose-buttons"):
+                yield Button("Cancel", variant="default", id="expose-cancel")
+                yield Button("Expose", variant="warning", id="expose-confirm")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "expose-confirm":
+            if hasattr(self.app, "perform_proxy_expose"):
+                self.app.perform_proxy_expose(self._target)
+            if self._parent:
+                self._parent.dismiss(True)
+            self.dismiss(True)
+        elif event.button.id == "expose-cancel":
+            self.dismiss(False)
+
+
+class ProxyExposeModal(ModalScreen[bool]):
+    """Configure gateway/system bind address for LAN access."""
+
+    CSS = """
+    ProxyExposeModal {
+        align: center middle;
+    }
+
+    #proxy-expose-dialog {
+        width: 80;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 2;
+    }
+
+    #proxy-expose-dialog Label {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #proxy-expose-buttons {
+        margin-top: 2;
+        width: 100%;
+        align: right middle;
+    }
+
+    #proxy-expose-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._gateway_listen = "127.0.0.1:7777"
+        self._system_listen_http = "127.0.0.1:80"
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="proxy-expose-dialog"):
+            yield Label("[b]LAN Access[/b]")
+            yield Label("[yellow]Exposing Devhost to the LAN is opt-in and requires confirmation.[/yellow]")
+            yield Static("", id="current-bindings")
+            yield Label("Bind target:")
+            yield RadioSet(
+                RadioButton("Localhost only (127.0.0.1)", id="bind-local"),
+                RadioButton("LAN (0.0.0.0)", id="bind-lan"),
+                RadioButton("Specific IPv4 address", id="bind-iface"),
+                id="bind-select",
+            )
+            yield Input(placeholder="e.g., 192.168.1.10", id="bind-ip")
+            yield Label("Rollback: devhost proxy expose --local")
+            with Horizontal(id="proxy-expose-buttons"):
+                yield Button("Cancel", variant="default", id="proxy-expose-cancel")
+                yield Button("Apply", variant="primary", id="proxy-expose-apply")
+
+    def on_mount(self) -> None:
+        state = getattr(self.app, "state", None) or StateConfig()
+        self._gateway_listen = state.gateway_listen
+        self._system_listen_http = state.raw.get("proxy", {}).get("system", {}).get("listen_http", "127.0.0.1:80")
+        current = self.query_one("#current-bindings", Static)
+        current.update(
+            f"Current gateway listen: {self._gateway_listen}\nCurrent system listen: {self._system_listen_http}"
+        )
+
+        gateway_host, _ = parse_listen(self._gateway_listen, "127.0.0.1", 7777)
+        bind_select = self.query_one("#bind-select", RadioSet)
+        bind_ip = self.query_one("#bind-ip", Input)
+
+        if gateway_host == "0.0.0.0":
+            bind_select.query_one("#bind-lan", RadioButton).value = True
+        elif gateway_host == "127.0.0.1":
+            bind_select.query_one("#bind-local", RadioButton).value = True
+        else:
+            bind_select.query_one("#bind-iface", RadioButton).value = True
+            bind_ip.value = gateway_host or ""
+
+    def _guard_pending_changes(self) -> bool:
+        session = getattr(self.app, "session", None)
+        if session and session.has_changes():
+            self.app.notify("Apply draft changes before updating proxy bindings.", severity="warning")
+            return False
+        return True
+
+    def _selected_target(self) -> tuple[str | None, str | None]:
+        bind_select = self.query_one("#bind-select", RadioSet)
+        button = bind_select.pressed_button
+        if not button:
+            for candidate in bind_select.query(RadioButton):
+                if candidate.value:
+                    button = candidate
+                    break
+        if not button:
+            return None, "Select a bind target."
+
+        if button.id == "bind-local":
+            return "127.0.0.1", None
+        if button.id == "bind-lan":
+            return "0.0.0.0", None
+        if button.id == "bind-iface":
+            bind_ip = self.query_one("#bind-ip", Input)
+            value = bind_ip.value.strip()
+            if not value:
+                return None, "Interface IP required."
+            try:
+                addr = ipaddress.ip_address(value)
+            except ValueError:
+                return None, "Invalid IP address."
+            if isinstance(addr, ipaddress.IPv6Address):
+                return None, "IPv6 binding not supported. Use an IPv4 address."
+            return value, None
+        return None, "Select a bind target."
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "proxy-expose-cancel":
+            self.dismiss(False)
+            return
+
+        if event.button.id == "proxy-expose-apply":
+            if not self._guard_pending_changes():
+                return
+            target, error = self._selected_target()
+            if error:
+                self.app.notify(error, severity="error")
+                return
+            if not target:
+                self.app.notify("No bind target selected.", severity="error")
+                return
+            if target != "127.0.0.1":
+                self.app.push_screen(ConfirmProxyExposeModal(target, parent=self))
+                return
+            if hasattr(self.app, "perform_proxy_expose"):
+                self.app.perform_proxy_expose(target)
+            self.dismiss(True)
+
+
 class ConfirmResetModal(ModalScreen[bool]):
     """Modal to confirm emergency reset."""
 
@@ -483,276 +872,193 @@ class ConfirmResetModal(ModalScreen[bool]):
         self.app.notify("Emergency reset complete", severity="warning")
 
 
-class AddRouteWizard(ModalScreen[bool]):
-    """Multi-step wizard to add a new route."""
+class HelpModal(ModalScreen[None]):
+    """Display keyboard shortcuts and commands help."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("q", "dismiss", "Close"),
+    ]
 
     CSS = """
-    AddRouteWizard {
+    HelpModal {
         align: center middle;
     }
 
-    #wizard-dialog {
-        width: 80;
-        height: auto;
-        min-height: 20;
+    #help-dialog {
+        width: 90%;
+        max-width: 120;
+        min-width: 80;
+        height: 85%;
         border: thick $primary;
         background: $surface;
         padding: 2;
     }
 
-    .wizard-title {
-        width: 100%;
+    #help-title {
+        text-align: center;
         text-style: bold;
+        color: $accent;
         margin-bottom: 1;
-    }
-
-    .wizard-step {
-        width: 100%;
-        margin-bottom: 1;
-    }
-
-    .field-label {
-        margin-bottom: 0;
-    }
-
-    .field-input {
-        margin-bottom: 1;
-    }
-
-    #port-list {
-        height: auto;
-        max-height: 10;
-        margin: 1 0;
         padding: 1;
-        background: $surface-darken-1;
-        border: round $primary-darken-2;
+        background: $primary-darken-1;
     }
 
-    #wizard-buttons {
-        margin-top: 2;
-        width: 100%;
-        align: right middle;
+    #help-content {
+        height: 1fr;
+        overflow-y: auto;
+        padding: 1;
     }
 
-    #wizard-buttons Button {
-        margin: 0 1;
+    #help-buttons {
+        dock: bottom;
+        height: 3;
+        align: center middle;
+        padding: 1;
     }
 
-    RadioSet {
-        margin: 1 0;
+    #help-buttons Button {
+        min-width: 12;
     }
     """
 
-    def __init__(self, detected_ports: list[ListeningPort] | None = None, scan_in_progress: bool = False):
-        super().__init__()
-        self.step = 0
-        self.route_name = ""
-        self.route_upstream = ""
-        self.route_mode = "gateway"
-        self.detected_ports: list[ListeningPort] = detected_ports or []
-        self._scan_in_progress = scan_in_progress
-
     def compose(self) -> ComposeResult:
-        with Vertical(id="wizard-dialog"):
-            yield Label("[b]Add Route - Step 1: Identity[/b]", id="wizard-title", classes="wizard-title")
-            yield Container(id="wizard-content")
-            with Horizontal(id="wizard-buttons"):
-                yield Button("Cancel", variant="default", id="cancel")
-                yield Button("Next", variant="primary", id="next")
+        with Vertical(id="help-dialog"):
+            yield Static("📖 Devhost Dashboard - Keyboard Shortcuts", id="help-title")
+            yield Markdown(
+                """
+## Navigation
+- `↑` `↓` - Navigate routes in table
+- `Tab` - Cycle through panes and tabs
+- `/` - Open command palette
+- `Enter` - Select route / Execute command
 
-    def on_mount(self) -> None:
-        """Scan for ports and show first step."""
-        if hasattr(self.app, "get_port_scan_results"):
-            ports, in_progress = self.app.get_port_scan_results()
-            self.detected_ports = ports
-            self._scan_in_progress = in_progress
-        self._show_step_1()
+## Route Actions
+- `A` - Add new route (opens wizard)
+- `D` - Delete selected route
+- `O` - Open route URL in browser
+- `Y` - Copy full URL to clipboard
+- `H` - Copy host header to clipboard
+- `U` - Copy upstream target to clipboard
 
-    def _port_list_text(self) -> str:
-        if self._scan_in_progress and not self.detected_ports:
-            return "Scanning for listening ports..."
-        if not self.detected_ports:
-            return "No listening ports found."
-        return "Detected listening ports:\n" + format_port_list(self.detected_ports[:8])
+## System Operations
+- `Ctrl+R` - Refresh all data
+- `Ctrl+S` - Apply draft changes
+- `Ctrl+P` - Probe all routes (health check)
+- `Ctrl+I` - Run integrity check
+- `Ctrl+Q` - Show QR code for selected route
+- `Ctrl+B` - Export diagnostic bundle (redacted)
+- `Ctrl+Shift+B` - Preview diagnostic bundle
 
-    def set_detected_ports(self, ports: list[ListeningPort]) -> None:
-        self.detected_ports = ports
-        self._scan_in_progress = False
-        if self.is_mounted and self.step == 0:
-            try:
-                port_list = self.query_one("#port-list", Static)
-                port_list.update(self._port_list_text())
-            except Exception:
-                return
+## Log Management
+- `0` - Show all log levels
+- `1` - Toggle INFO level
+- `2` - Toggle WARN level
+- `3` - Toggle ERROR level
 
-    def _show_step_1(self) -> None:
-        """Show step 1: Identity & Target."""
-        content = self.query_one("#wizard-content")
-        content.remove_children()
+## Proxy & Configuration
+- `E` - External proxy attach/detach
+- `Ctrl+X` - Emergency reset (kill owned processes)
 
-        content.mount(Static(self._port_list_text(), id="port-list"))
+## Command Palette Commands
+- `/add` - Add a new route
+- `/delete` or `/remove` - Delete selected route
+- `/qr` - Show QR code
+- `/logs` - Switch to Logs tab
+- `/probe` - Probe all routes
+- `/settings` - Switch to Config tab
+- `/help` - Show this help screen
 
-        # Route name input
-        content.mount(Label("Route Name (subdomain):", classes="field-label"))
-        content.mount(Input(placeholder="e.g., api, web, dashboard", id="name-input", classes="field-input"))
+## General
+- `Q` - Quit application
+- `F1` - Show this help screen
+- `Esc` - Close modals/dialogs
 
-        # Upstream input
-        content.mount(Label("Upstream Target:", classes="field-label"))
-        content.mount(Input(placeholder="e.g., 8000 or 127.0.0.1:8000", id="upstream-input", classes="field-input"))
-
-        # Update title
-        title = self.query_one("#wizard-title")
-        title.update("[b]Add Route - Step 1: Identity[/b]")
-
-    def _show_step_2(self) -> None:
-        """Show step 2: Access Mode."""
-        content = self.query_one("#wizard-content")
-        content.remove_children()
-
-        state = getattr(self.app, "session", None) or StateConfig()
-
-        content.mount(Label("Select routing mode:", classes="field-label"))
-        content.mount(
-            RadioSet(
-                RadioButton(
-                    f"Gateway (recommended) - Routes through port {state.gateway_port}",
-                    id="mode-gateway",
-                    value=True,
-                ),
-                RadioButton("System - Portless URLs on port 80/443 (requires install)", id="mode-system"),
-                RadioButton("External - Integrate with existing proxy", id="mode-external"),
-                id="mode-select",
+## Tips
+- **Draft Mode**: Changes are staged until you press `Ctrl+S` to apply
+- **Status Indicators**: ● ONLINE (green), ● OFFLINE (red), ● DISABLED (dim)
+- **Focus**: Use `Tab` to move between sections, arrows within sections
+- **Clipboard**: Y/H/U shortcuts copy different route information
+                """,
+                id="help-content",
             )
-        )
-
-        # Update title
-        title = self.query_one("#wizard-title")
-        title.update("[b]Add Route - Step 2: Mode[/b]")
-
-        # Update button
-        next_btn = self.query_one("#next", Button)
-        next_btn.label = "Next"
-
-    def _show_step_3(self) -> None:
-        """Show step 3: Review & Confirm."""
-        content = self.query_one("#wizard-content")
-        content.remove_children()
-
-        state = getattr(self.app, "session", None) or StateConfig()
-
-        # Build review text
-        review = f"""
-[b]Review Configuration[/b]
-
-Route Name:  {self.route_name}
-Upstream:    {self.route_upstream}
-Mode:        {self.route_mode}
-Domain:      {state.system_domain}
-
-[b]This will:[/b]
-  • Write to: ~/.devhost/state.yml
-"""
-        if self.route_mode == "system":
-            from devhost_cli.caddy_lifecycle import get_caddyfile_path
-
-            review += f"  • Generate: {get_caddyfile_path(state)}\n"
-        elif self.route_mode == "external":
-            review += f"  • Generate: {state.snippet_path}\n"
-        else:
-            review += "  • No proxy snippet needed (gateway mode)\n"
-
-        review += """  • Enable integrity hashing
-
-[b]URL:[/b]
-"""
-        if self.route_mode == "gateway":
-            review += f"  http://{self.route_name}.{state.system_domain}:{state.gateway_port}"
-        else:
-            review += f"  http://{self.route_name}.{state.system_domain}"
-
-        content.mount(Static(review))
-
-        # Update title
-        title = self.query_one("#wizard-title")
-        title.update("[b]Add Route - Step 3: Review[/b]")
-
-        # Update button
-        next_btn = self.query_one("#next", Button)
-        next_btn.label = "Apply"
+            with Horizontal(id="help-buttons"):
+                yield Button("Close", id="close-help", variant="primary")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "cancel":
-            self.dismiss(False)
-        elif event.button.id == "next":
-            self._advance_step()
+        if event.button.id == "close-help":
+            self.dismiss()
 
-    def _advance_step(self) -> None:
-        """Advance to the next step."""
-        if self.step == 0:
-            # Validate step 1
-            name_input = self.query_one("#name-input", Input)
-            upstream_input = self.query_one("#upstream-input", Input)
 
-            self.route_name = name_input.value.strip().lower()
-            self.route_upstream = upstream_input.value.strip()
+class ConfirmDeleteModal(ModalScreen[bool]):
+    """Confirmation dialog for deleting a route."""
 
-            if not self.route_name:
-                self.app.notify("Route name is required", severity="error")
-                return
-            if not validate_name(self.route_name):
-                self.app.notify("Invalid route name. Use letters, numbers, and hyphens.", severity="error")
-                return
-            if not self.route_upstream:
-                self.app.notify("Upstream target is required", severity="error")
-                return
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("n", "cancel", "No"),
+    ]
 
-            if not parse_target(self.route_upstream):
-                self.app.notify(
-                    "Invalid upstream target. Use <port>, <host>:<port>, or http(s)://<host>:<port>.",
-                    severity="error",
-                )
-                return
+    CSS = """
+    ConfirmDeleteModal {
+        align: center middle;
+    }
 
-            # Normalize upstream for portability
-            if self.route_upstream.isdigit():
-                self.route_upstream = f"127.0.0.1:{self.route_upstream}"
+    #delete-dialog {
+        width: 70;
+        height: auto;
+        border: thick $error;
+        background: $surface;
+        padding: 2;
+    }
 
-            self.step = 1
-            self._show_step_2()
+    #delete-title {
+        text-align: center;
+        text-style: bold;
+        color: $error;
+        margin-bottom: 1;
+        padding: 1;
+    }
 
-        elif self.step == 1:
-            # Get selected mode
-            mode_select = self.query_one("#mode-select", RadioSet)
-            if mode_select.pressed_button:
-                button_id = mode_select.pressed_button.id
-                if button_id == "mode-gateway":
-                    self.route_mode = "gateway"
-                elif button_id == "mode-system":
-                    self.route_mode = "system"
-                elif button_id == "mode-external":
-                    self.route_mode = "external"
+    #delete-message {
+        text-align: center;
+        padding: 1;
+        margin: 1 0 2 0;
+    }
 
-            self.step = 2
-            self._show_step_3()
+    #delete-buttons {
+        width: 100%;
+        height: 3;
+        align: center middle;
+    }
 
-        elif self.step == 2:
-            # Apply the configuration
-            self._apply_route()
-            self.dismiss(True)
+    #delete-buttons Button {
+        margin: 0 1;
+        min-width: 12;
+    }
+    """
 
-    def _apply_route(self) -> None:
-        """Apply the route configuration."""
-        if hasattr(self.app, "queue_route_change"):
-            self.app.queue_route_change(self.route_name, self.route_upstream, self.route_mode)
-        else:
-            state = StateConfig()
-            state.set_route(
-                self.route_name,
-                self.route_upstream,
-                domain=state.system_domain,
-                enabled=True,
+    def __init__(self, route_name: str):
+        super().__init__()
+        self.route_name = route_name
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="delete-dialog"):
+            yield Static("⚠️  Confirm Delete", id="delete-title")
+            yield Static(
+                f"Are you sure you want to delete route '[bold]{self.route_name}[/bold]'?\n\n"
+                "This will remove the route from your configuration (draft mode).\n"
+                "Press Ctrl+S to persist the change.",
+                id="delete-message",
             )
-            state.proxy_mode = self.route_mode
+            with Horizontal(id="delete-buttons"):
+                yield Button("Delete", id="confirm-delete", variant="error")
+                yield Button("Cancel", id="cancel-delete", variant="default")
 
-        self.app.notify(f"Route '{self.route_name}' added (draft)", severity="information")
-        self.app.refresh_data()
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm-delete":
+            self.dismiss(True)
+        else:
+            self.dismiss(False)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)

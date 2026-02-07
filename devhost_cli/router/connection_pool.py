@@ -26,6 +26,9 @@ READ_TIMEOUT = float(os.getenv("DEVHOST_READ_TIMEOUT", "30.0"))
 WRITE_TIMEOUT = float(os.getenv("DEVHOST_WRITE_TIMEOUT", "30.0"))
 POOL_TIMEOUT = float(os.getenv("DEVHOST_POOL_TIMEOUT", "5.0"))
 
+# Redirect policy (opt-in; default is False to avoid SSRF via upstream redirects)
+FOLLOW_REDIRECTS = os.getenv("DEVHOST_FOLLOW_REDIRECTS", "0").lower() in {"1", "true", "yes", "on"}
+
 # Retry configuration
 MAX_RETRIES = int(os.getenv("DEVHOST_MAX_RETRIES", "3"))
 RETRY_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}  # Safe to retry
@@ -144,7 +147,7 @@ def create_http_client(
     client = httpx.AsyncClient(
         limits=limits,
         timeout=timeout,
-        follow_redirects=True,  # Follow redirects automatically
+        follow_redirects=FOLLOW_REDIRECTS,
         http2=False,  # Disable HTTP/2 for now (compatibility)
         verify=verify,
     )

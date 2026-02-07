@@ -39,13 +39,24 @@ class SessionState:
     def get_route(self, name: str) -> dict | None:
         return self.routes.get(name)
 
-    def set_route(self, name: str, upstream: str, domain: str, enabled: bool = True, tags: list | None = None) -> None:
-        self._draft.setdefault("routes", {})[name] = {
+    def set_route(
+        self,
+        name: str,
+        upstream: str,
+        domain: str,
+        enabled: bool = True,
+        tags: list | None = None,
+        upstreams: list[dict] | None = None,
+    ) -> None:
+        route = {
             "upstream": upstream,
             "domain": domain,
             "enabled": enabled,
             "tags": tags or [],
         }
+        if upstreams:
+            route["upstreams"] = upstreams
+        self._draft.setdefault("routes", {})[name] = route
 
     def remove_route(self, name: str) -> None:
         if name in self._draft.get("routes", {}):
@@ -65,6 +76,11 @@ class SessionState:
     @property
     def external_driver(self) -> str:
         return self._draft.get("proxy", {}).get("external", {}).get("driver", "caddy")
+
+    @property
+    def external_config_path(self) -> Path | None:
+        path = self._draft.get("proxy", {}).get("external", {}).get("config_path")
+        return Path(path) if path else None
 
     def set_external_config(self, driver: str, config_path: str | None = None) -> None:
         external = self._draft.setdefault("proxy", {}).setdefault("external", {})

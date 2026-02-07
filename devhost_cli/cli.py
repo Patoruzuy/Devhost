@@ -11,6 +11,7 @@ from .caddy import edit_config, generate_caddyfile, print_caddyfile
 from .config import Config
 from .output import console, print_info, print_routes, print_success, print_warning
 from .platform import IS_WINDOWS, is_admin
+from .proxy import parse_upstream_entry
 from .router_manager import Router
 from .state import StateConfig
 from .utils import Colors, msg_error, msg_info, msg_step, msg_success, msg_warning
@@ -90,7 +91,7 @@ class DevhostCLI:
                 return f"{upstream_scheme}://{host}:{port}"
         return f"http://{name}.{domain}:{gateway_port}"
 
-    def add(self, name: str, target: str, scheme: str | None = None):
+    def add(self, name: str, target: str, scheme: str | None = None, extra_upstreams: list[str] | None = None):
         """Add a new mapping"""
         msg_step(1, 4, "Validating inputs...")
 
@@ -139,6 +140,8 @@ class DevhostCLI:
 
         domain = self.config.get_domain()
         msg_success(f"Added mapping: {name}.{domain} -> {target_scheme}://{host}:{port}")
+        if extra_upstreams:
+            msg_info("Additional upstreams saved for external proxy exports.")
 
         # Keep v3 state routes in sync (Mode 2/3 tooling relies on this)
         try:
@@ -146,7 +149,26 @@ class DevhostCLI:
             upstream = f"{host}:{port}"
             if target_scheme == "https":
                 upstream = f"https://{upstream}"
-            state.set_route(name, upstream=upstream, domain=domain, enabled=True)
+            upstream_specs: list[dict] = []
+            primary_spec = parse_upstream_entry(raw_target)
+            if primary_spec:
+                upstream_specs.append(primary_spec)
+
+            if extra_upstreams:
+                for raw in extra_upstreams:
+                    spec = parse_upstream_entry(raw)
+                    if not spec:
+                        msg_warning(f"Skipping invalid upstream: {raw}")
+                        continue
+                    upstream_specs.append(spec)
+
+            state.set_route(
+                name,
+                upstream=upstream,
+                domain=domain,
+                enabled=True,
+                upstreams=upstream_specs or None,
+            )
         except Exception:
             pass
 
@@ -727,4 +749,63 @@ class DevhostCLI:
     def edit(self):
         """Open config in editor"""
         edit_config()
+        return True
+
+    def scan(self, json_output: bool = False):
+        """Scan for listening ports on the system (ghost port detection)."""
+        from devhost_cli.scanner import detect_framework, format_port_list, get_common_dev_ports, scan_listening_ports
+
+        msg_info("Scanning for listening ports...")
+        ports = scan_listening_ports(exclude_system=True)
+
+        if not ports:
+            msg_warning("No listening ports found.")
+            msg_info("Tip: Start your application and run 'devhost scan' again.")
+            msg_info("Note: Port scanning requires psutil. Install with: pip install psutil")
+            return True
+
+        if json_output:
+            import json as json_lib
+
+            output = [
+                {
+                    "port": p.port,
+                    "pid": p.pid,
+                    "process": p.name,
+                    "framework": detect_framework(p.name, p.port),
+                    "description": get_common_dev_ports().get(p.port),
+                }
+                for p in ports
+            ]
+            console.print(json_lib.dumps(output, indent=2))
+            return True
+
+        # Pretty output
+        msg_success(f"Found {len(ports)} listening port(s):")
+        console.print()
+
+        common_ports = get_common_dev_ports()
+        for p in ports:
+            framework = detect_framework(p.name, p.port)
+            desc = common_ports.get(p.port)
+
+            # Emoji based on detection
+            emoji = "🐍" if "python" in p.name.lower() else "🟢"
+            if framework:
+                emoji = {"Python": "🐍", "Node.js": "🟢", "PostgreSQL": "🐘", "Redis": "🔴", "MongoDB": "🍃"}.get(
+                    framework.split("/")[0], "🟢"
+                )
+
+            line = f"{emoji} Port [cyan]{p.port:5d}[/cyan]  {p.name:20s}"
+            if framework:
+                line += f"  [yellow][{framework}][/yellow]"
+            elif desc:
+                line += f"  [dim]({desc})[/dim]"
+            line += f"  [dim](PID {p.pid})[/dim]"
+
+            console.print(line)
+
+        console.print()
+        msg_info("To add a route quickly: devhost add <name> <port>")
+        msg_info("For guided setup: devhost dashboard (then press A or type /add)")
         return True

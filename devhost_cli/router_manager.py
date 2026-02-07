@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .config import Config
 from .platform import IS_WINDOWS, find_python
+from .state import StateConfig, parse_listen
 from .utils import msg_error, msg_info, msg_step, msg_success, msg_warning
 
 
@@ -38,11 +39,16 @@ class Router:
 
     def _gateway_port(self) -> int:
         try:
-            from .state import StateConfig
-
             return StateConfig().gateway_port
         except Exception:
             return 7777
+
+    def _gateway_host(self) -> str:
+        try:
+            host, _ = parse_listen(StateConfig().gateway_listen, "127.0.0.1", 7777)
+            return host or "127.0.0.1"
+        except Exception:
+            return "127.0.0.1"
 
     def is_running(self) -> tuple[bool, int | None]:
         """Check if router is running, return (is_running, pid)"""
@@ -72,7 +78,10 @@ class Router:
             import urllib.request
 
             port = self._gateway_port()
-            req = urllib.request.Request(f"http://127.0.0.1:{port}/health")
+            host = self._gateway_host()
+            if host == "0.0.0.0":
+                host = "127.0.0.1"
+            req = urllib.request.Request(f"http://{host}:{port}/health")
             with urllib.request.urlopen(req, timeout=2) as response:
                 return response.status == 200
         except Exception:
@@ -122,6 +131,7 @@ class Router:
         self.err_file.parent.mkdir(parents=True, exist_ok=True)
 
         port = self._gateway_port()
+        host = self._gateway_host()
         cfg = Config()
         env = os.environ.copy()
         env.setdefault("DEVHOST_CONFIG", str(cfg.config_file))
@@ -137,7 +147,7 @@ class Router:
             cmd.extend(["--factory", "devhost_cli.router.core:create_app"])
             cwd = str(self.script_dir)
 
-        cmd.extend(["--host", "127.0.0.1", "--port", str(port)])
+        cmd.extend(["--host", host or "127.0.0.1", "--port", str(port)])
 
         creationflags = 0
         if IS_WINDOWS and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):

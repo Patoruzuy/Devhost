@@ -53,6 +53,19 @@ brew install caddy
 ### Linux
 Follow the [official installation instructions](https://caddyserver.com/docs/install#debian-ubuntu-raspbian) for your distribution.
 
+### Optional: Devhost Installer Helper
+
+You can also use the Devhost installer helper to perform opt-in setup steps:
+
+```bash
+devhost install --caddy
+devhost install --install-completions
+devhost install --domain mydev.local
+```
+
+The installer will ask for confirmation before running package manager commands.
+Use `--dry-run` to preview actions and `--yes` to skip confirmations.
+
 ## 4. Verification
 
 Run the diagnostics command to ensure everything is set up correctly:

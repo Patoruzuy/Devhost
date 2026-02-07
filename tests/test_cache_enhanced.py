@@ -82,17 +82,20 @@ class TestRouteCacheEnhanced(unittest.IsolatedAsyncioTestCase):
 
     async def test_ttl_expiration(self):
         """Test that TTL expiration triggers reload."""
+        # Use a short TTL in this test so expiration is deterministic and fast.
+        cache = RouteCache(route_ttl=1.0, config_ttl=0.1)
+
         # Initial load
-        await self.cache.get_routes()
+        await cache.get_routes()
 
         # Wait for TTL to expire
         await asyncio.sleep(0.12)
 
         # Load again (should reload due to TTL)
-        await self.cache.get_routes()
+        await cache.get_routes()
 
         # Check metrics
-        metrics = self.cache.get_metrics()
+        metrics = cache.get_metrics()
         self.assertEqual(metrics["reloads"], 2)  # Initial + TTL expiration
         self.assertGreater(metrics["cache_age_seconds"], 0.0)
 

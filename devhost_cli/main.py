@@ -10,7 +10,7 @@ from .cli import DevhostCLI
 from .config import YAML_AVAILABLE, Config
 from .platform import IS_WINDOWS, is_admin, relaunch_as_admin
 from .utils import msg_error, msg_info, msg_success, msg_warning
-from .windows import caddy_restart, caddy_start, caddy_status, caddy_stop, doctor_windows, hosts_clear, hosts_sync
+from .windows import caddy_restart, caddy_start, caddy_status, caddy_stop, doctor_windows, hosts_clear, hosts_restore, hosts_sync
 
 
 def handle_init(args) -> bool:
@@ -118,6 +118,12 @@ def main():
     add_parser.add_argument("target", help="Port or host:port or URL")
     add_parser.add_argument("--http", action="store_const", const="http", dest="scheme", help="Force HTTP")
     add_parser.add_argument("--https", action="store_const", const="https", dest="scheme", help="Force HTTPS")
+    add_parser.add_argument(
+        "--upstream",
+        action="append",
+        dest="extra_upstreams",
+        help="Additional upstreams (tcp:host:port, lan:host:port, docker:host:port, unix:/path)",
+    )
 
     # remove command
     remove_parser = subparsers.add_parser("remove", help="Remove a mapping")
@@ -203,12 +209,16 @@ def main():
     # fix-http command
     subparsers.add_parser("fix-http", help="Convert https mappings to http")
 
+    # scan command
+    scan_parser = subparsers.add_parser("scan", help="Scan for listening ports (ghost port detection)")
+    scan_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
     # info command
     subparsers.add_parser("info", help="Show help")
 
     # hosts command (Windows)
     hosts_parser = subparsers.add_parser("hosts", help="Manage Windows hosts entries")
-    hosts_parser.add_argument("action", choices=["sync", "clear"])
+    hosts_parser.add_argument("action", choices=["sync", "clear", "restore"])
 
     # caddy command (Windows)
     caddy_parser = subparsers.add_parser("caddy", help="Manage Caddy (Windows)")
@@ -277,12 +287,22 @@ def main():
         "--to", dest="to_mode", choices=["gateway", "system"], required=True, help="Target mode"
     )
 
+    # proxy expose
+    proxy_expose_parser = proxy_subparsers.add_parser("expose", help="Bind proxy to LAN or localhost")
+    expose_group = proxy_expose_parser.add_mutually_exclusive_group(required=True)
+    expose_group.add_argument("--lan", action="store_true", help="Bind to 0.0.0.0 (LAN access)")
+    expose_group.add_argument("--local", action="store_true", help="Bind to 127.0.0.1 (localhost only)")
+    expose_group.add_argument("--iface", help="Bind to a specific interface IP (e.g. 192.168.1.10)")
+    proxy_expose_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
+
     # proxy export
     proxy_export_parser = proxy_subparsers.add_parser("export", help="Export proxy config snippets")
     proxy_export_parser.add_argument(
         "--driver", "-d", choices=["caddy", "nginx", "traefik"], help="Specific driver (default: all)"
     )
     proxy_export_parser.add_argument("--show", "-s", action="store_true", help="Print snippet without saving")
+    proxy_export_parser.add_argument("--use-lock", action="store_true", help="Generate from lockfile")
+    proxy_export_parser.add_argument("--lock-path", help="Path to lockfile (default: ~/.devhost/devhost.lock.json)")
 
     # proxy discover
     proxy_subparsers.add_parser("discover", help="Discover proxy config files")
@@ -291,10 +311,54 @@ def main():
     proxy_attach_parser = proxy_subparsers.add_parser("attach", help="Attach devhost to proxy config")
     proxy_attach_parser.add_argument("driver", choices=["caddy", "nginx", "traefik"], help="Proxy driver")
     proxy_attach_parser.add_argument("--config-path", "-c", help="Path to proxy config file")
+    proxy_attach_parser.add_argument("--no-validate", action="store_true", help="Skip proxy config validation")
+    proxy_attach_parser.add_argument("--use-lock", action="store_true", help="Use lockfile for snippet generation")
+    proxy_attach_parser.add_argument("--lock-path", help="Path to lockfile (default: ~/.devhost/devhost.lock.json)")
 
     # proxy detach
     proxy_detach_parser = proxy_subparsers.add_parser("detach", help="Detach devhost from proxy config")
     proxy_detach_parser.add_argument("--config-path", "-c", help="Path to proxy config file")
+    proxy_detach_parser.add_argument("--force", action="store_true", help="Detach even if marker block drifted")
+
+    # proxy drift
+    proxy_drift_parser = proxy_subparsers.add_parser("drift", help="Check external proxy drift")
+    proxy_drift_parser.add_argument("--driver", "-d", choices=["caddy", "nginx", "traefik"], help="Proxy driver")
+    proxy_drift_parser.add_argument("--config-path", "-c", help="Path to proxy config file")
+    proxy_drift_parser.add_argument("--validate", action="store_true", help="Run proxy validator")
+    proxy_drift_parser.add_argument("--accept", action="store_true", help="Accept current files as baseline")
+
+    # proxy validate
+    proxy_validate_parser = proxy_subparsers.add_parser("validate", help="Validate external proxy config")
+    proxy_validate_parser.add_argument("--driver", "-d", choices=["caddy", "nginx", "traefik"], help="Proxy driver")
+    proxy_validate_parser.add_argument("--config-path", "-c", help="Path to proxy config file")
+
+    # proxy lock
+    proxy_lock_parser = proxy_subparsers.add_parser("lock", help="Manage proxy lockfile")
+    lock_subparsers = proxy_lock_parser.add_subparsers(dest="lock_action", help="Lockfile action")
+    lock_write = lock_subparsers.add_parser("write", help="Write lockfile from current routes")
+    lock_write.add_argument("--path", "-p", help="Path to lockfile (default: ~/.devhost/devhost.lock.json)")
+    lock_apply = lock_subparsers.add_parser("apply", help="Apply lockfile to state")
+    lock_apply.add_argument("--path", "-p", help="Path to lockfile (default: ~/.devhost/devhost.lock.json)")
+    lock_apply.add_argument("--no-config", action="store_true", help="Do not update devhost.json")
+    lock_show = lock_subparsers.add_parser("show", help="Show lockfile contents")
+    lock_show.add_argument("--path", "-p", help="Path to lockfile (default: ~/.devhost/devhost.lock.json)")
+
+    # proxy sync
+    proxy_sync_parser = proxy_subparsers.add_parser("sync", help="Sync proxy snippets")
+    proxy_sync_parser.add_argument("--driver", "-d", choices=["caddy", "nginx", "traefik"], help="Proxy driver")
+    proxy_sync_parser.add_argument("--watch", "-w", action="store_true", help="Watch for changes")
+    proxy_sync_parser.add_argument("--interval", type=float, default=2.0, help="Polling interval (seconds)")
+    proxy_sync_parser.add_argument("--use-lock", action="store_true", help="Sync from lockfile")
+    proxy_sync_parser.add_argument("--lock-path", help="Path to lockfile (default: ~/.devhost/devhost.lock.json)")
+
+    # proxy cleanup
+    proxy_cleanup_parser = proxy_subparsers.add_parser("cleanup", help="Remove Devhost-managed proxy files")
+    proxy_cleanup_parser.add_argument("--system", action="store_true", help="Remove system-mode Caddyfile")
+    proxy_cleanup_parser.add_argument("--external", action="store_true", help="Remove external snippets/manifests")
+    proxy_cleanup_parser.add_argument("--lock", action="store_true", help="Remove proxy lockfile")
+    proxy_cleanup_parser.add_argument("--all", action="store_true", help="Remove all Devhost-managed proxy files")
+    proxy_cleanup_parser.add_argument("--dry-run", action="store_true", help="Show what would be removed")
+    proxy_cleanup_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     # proxy transfer
     proxy_transfer_parser = proxy_subparsers.add_parser("transfer", help="Transfer to external proxy mode")
@@ -364,7 +428,7 @@ def main():
 
     try:
         if args.command == "add":
-            success = cli.add(args.name, args.target, args.scheme)
+            success = cli.add(args.name, args.target, args.scheme, args.extra_upstreams)
         elif args.command == "remove":
             success = cli.remove(args.name)
         elif args.command == "list":
@@ -433,6 +497,8 @@ def main():
                 success = True
         elif args.command == "fix-http":
             success = cli.fix_http()
+        elif args.command == "scan":
+            success = cli.scan(json_output=args.json)
         elif args.command == "info":
             parser.print_help()
             success = True
@@ -455,8 +521,10 @@ def main():
             else:
                 if args.action == "sync":
                     hosts_sync()
-                else:
+                elif args.action == "clear":
                     hosts_clear()
+                else:
+                    hosts_restore()
                 success = True
         elif args.command == "caddy":
             if not IS_WINDOWS:
@@ -514,13 +582,19 @@ def main():
                 cmd_proxy_status,
                 cmd_proxy_stop,
                 cmd_proxy_upgrade,
+                cmd_proxy_expose,
             )
             from .proxy import (
                 cmd_proxy_attach,
+                cmd_proxy_cleanup,
                 cmd_proxy_detach,
                 cmd_proxy_discover,
+                cmd_proxy_drift,
                 cmd_proxy_export,
+                cmd_proxy_lock,
+                cmd_proxy_sync,
                 cmd_proxy_transfer,
+                cmd_proxy_validate,
             )
 
             if args.proxy_action == "start":
@@ -533,17 +607,64 @@ def main():
                 success = cmd_proxy_reload()
             elif args.proxy_action == "upgrade":
                 success = cmd_proxy_upgrade(args.to_mode)
+            elif args.proxy_action == "expose":
+                mode = "lan" if args.lan else "local"
+                success = cmd_proxy_expose(mode, args.iface, args.yes)
             elif args.proxy_action == "export":
-                cmd_proxy_export(args.driver, args.show)
+                cmd_proxy_export(
+                    args.driver,
+                    args.show,
+                    use_lock=args.use_lock,
+                    lock_path=Path(args.lock_path) if args.lock_path else None,
+                )
                 success = True
             elif args.proxy_action == "discover":
                 cmd_proxy_discover()
                 success = True
             elif args.proxy_action == "attach":
-                cmd_proxy_attach(args.driver, args.config_path)
+                cmd_proxy_attach(
+                    args.driver,
+                    args.config_path,
+                    no_validate=args.no_validate,
+                    use_lock=args.use_lock,
+                    lock_path=Path(args.lock_path) if args.lock_path else None,
+                )
                 success = True
             elif args.proxy_action == "detach":
-                cmd_proxy_detach(args.config_path)
+                cmd_proxy_detach(args.config_path, force=args.force)
+                success = True
+            elif args.proxy_action == "drift":
+                cmd_proxy_drift(
+                    driver=args.driver,
+                    config_path=args.config_path,
+                    validate=args.validate,
+                    accept=args.accept,
+                )
+                success = True
+            elif args.proxy_action == "validate":
+                cmd_proxy_validate(driver=args.driver, config_path=args.config_path)
+                success = True
+            elif args.proxy_action == "lock":
+                cmd_proxy_lock(args.lock_action, path=args.path, no_config=getattr(args, "no_config", False))
+                success = True
+            elif args.proxy_action == "sync":
+                cmd_proxy_sync(
+                    driver=args.driver,
+                    watch=args.watch,
+                    interval=args.interval,
+                    use_lock=args.use_lock,
+                    lock_path=Path(args.lock_path) if args.lock_path else None,
+                )
+                success = True
+            elif args.proxy_action == "cleanup":
+                cmd_proxy_cleanup(
+                    include_system=args.system,
+                    include_external=args.external,
+                    include_lock=args.lock,
+                    include_all=args.all,
+                    dry_run=args.dry_run,
+                    assume_yes=args.yes,
+                )
                 success = True
             elif args.proxy_action == "transfer":
                 cmd_proxy_transfer(
@@ -556,7 +677,7 @@ def main():
                 success = True
             else:
                 msg_info(
-                    "Usage: devhost proxy {start|stop|status|reload|upgrade|export|discover|attach|detach|transfer}"
+                    "Usage: devhost proxy {start|stop|status|reload|upgrade|expose|export|discover|attach|detach|drift|validate|lock|sync|cleanup|transfer}"
                 )
                 success = True
         elif args.command == "tunnel":
@@ -586,15 +707,9 @@ def main():
 
             success = cmd_logs(follow=args.follow, lines=args.lines, clear=args.clear)
         elif args.command == "install":
-            script_dir = Path(__file__).parent.parent.resolve()
-            install_script = script_dir / "install.py"
-            if not install_script.exists():
-                msg_error("install.py not found.")
-                success = False
-            else:
-                cmd = [sys.executable, str(install_script)] + sys.argv[2:]
-                result = subprocess.run(cmd, check=False)
-                success = result.returncode == 0
+            from .installer import main as installer_main
+
+            success = installer_main(sys.argv[2:]) == 0
         else:
             parser.print_help()
             return 1

@@ -27,6 +27,23 @@ If port `7777` is taken:
 - stop the conflicting process, or
 - change `proxy.gateway.listen` in `~/.devhost/state.yml` (then restart `devhost start`).
 
+## Need LAN access
+
+By default Devhost binds to `127.0.0.1` only. To allow other devices on your LAN:
+
+```bash
+devhost proxy expose --lan
+# or bind to a specific interface
+devhost proxy expose --iface 192.168.1.10
+```
+
+Rollback:
+```bash
+devhost proxy expose --local
+```
+
+After changing bind addresses, restart the router (`devhost stop && devhost start`). In System mode, also run `devhost proxy reload`.
+
 ## System mode: ports 80/443 in use
 
 ```bash
@@ -35,6 +52,35 @@ devhost doctor
 ```
 
 If another process owns port 80/443, stop it or switch to External mode.
+
+## I see a Caddyfile under `~/.devhost/proxy/caddy`
+
+That file is Devhost's **system-mode** Caddyfile. Gateway mode does not use it.
+If you want to remove Devhost-managed proxy files, use:
+
+```bash
+devhost proxy cleanup --system
+```
+
+## External proxy drift or snippet changes
+
+If you edited proxy configs or snippets manually, drift checks can explain what changed:
+
+```bash
+devhost proxy drift --validate
+```
+
+To accept the current files as the new baseline:
+
+```bash
+devhost proxy drift --accept
+```
+
+If the managed include/import block was removed, re-attach:
+
+```bash
+devhost proxy attach <driver> --config-path <path>
+```
 
 ## DNS: `api.<domain>` does not resolve
 
@@ -81,4 +127,3 @@ If `devhost dashboard` fails to import Textual:
 ```bash
 pip install devhost[tui]
 ```
-

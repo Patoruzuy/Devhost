@@ -7,7 +7,7 @@ Devhost implements defense-in-depth security measures to protect against common 
 **Core Principle**: Secure by default, with explicit opt-ins for permissive behavior.
 
 - **Localhost-only binding**: Router binds to 127.0.0.1 by default (not 0.0.0.0)
-- **No LAN exposure**: Apps are not exposed to your network unless you explicitly tunnel
+- **No LAN exposure**: Apps are not exposed to your network unless you explicitly enable LAN access (`devhost proxy expose --lan`) or use a tunnel
 - **SSRF protection**: Blocks access to cloud metadata endpoints and private networks
 - **Input validation**: All user inputs are validated before use
 - **Subprocess safety**: All subprocess calls use list-based arguments (no shell injection)
@@ -204,6 +204,19 @@ Devhost follows least privilege principles:
 - Binds to port 7777 (unprivileged)
 - No system file modifications
 
+**LAN Exposure (Opt-in)**:
+- Disabled by default
+- Requires explicit command and confirmation
+- Rollback: `devhost proxy expose --local`
+
+To expose Devhost on your LAN:
+```bash
+devhost proxy expose --lan
+# or bind to a specific interface
+devhost proxy expose --iface 192.168.1.10
+```
+Then restart the router (`devhost stop && devhost start`). In System mode, also run `devhost proxy reload`.
+
 **System Mode**:
 - One-time admin setup (Windows)
 - Manages Caddy on ports 80/443
@@ -271,6 +284,17 @@ export DEVHOST_TIMEOUT=120  # 2 minutes for slow backends
 **Example**:
 ```bash
 export DEVHOST_RETRY_ATTEMPTS=5  # More retries for unstable backends
+```
+
+### DEVHOST_FOLLOW_REDIRECTS
+
+**Default**: false  
+**Impact**: HIGH - Following redirects can bypass SSRF controls  
+**Use Case**: Only enable if you explicitly want the router to follow upstream redirects.
+
+**Example**:
+```bash
+export DEVHOST_FOLLOW_REDIRECTS=1
 ```
 
 ### DEVHOST_LOG_REQUESTS

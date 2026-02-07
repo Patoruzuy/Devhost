@@ -2,120 +2,135 @@
 Devhost TUI - Custom Widgets
 
 Contains the custom widgets for the dashboard:
-- Sidebar: Navigation tree
+- NavSidebar: Vertical ListView navigation with icons
 - StatusGrid: Route status table
-- DetailsPane: Tabbed details view
+- DetailsPane: Tabbed details view (flow, verify, logs, config, integrity)
 - FlowDiagram: ASCII traffic flow visualization
 - IntegrityPanel: File integrity status
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from textual.app import ComposeResult
-from textual.containers import Horizontal
-from textual.widgets import Button, DataTable, Input, Label, Markdown, Static, TabbedContent, TabPane, Tree
+from textual.containers import Horizontal, VerticalScroll
+from textual.message import Message
+from textual.widgets import (
+    Button,
+    DataTable,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    Markdown,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 
 from devhost_cli.state import StateConfig
 
+if TYPE_CHECKING:
+    pass
 
-class Sidebar(Static):
-    """Navigation sidebar with tree view."""
+
+# ---------------------------------------------------------------------------
+# Navigation Items
+# ---------------------------------------------------------------------------
+
+NAV_ITEMS = [
+    ("routes", "📋", "Routes"),
+    ("tunnels", "🔗", "Tunnels"),
+    ("proxy", "⚙", "Proxy"),
+    ("diagnostics", "🩺", "Diagnostics"),
+    ("settings", "🔧", "Settings"),
+]
+
+
+# ---------------------------------------------------------------------------
+# NavSidebar
+# ---------------------------------------------------------------------------
+
+
+class NavSidebar(Static):
+    """Vertical sidebar with icon-labelled navigation and state summary."""
+
+    class ScreenSelected(Message):
+        """Posted when the user selects a nav item."""
+
+        def __init__(self, screen_id: str) -> None:
+            self.screen_id = screen_id
+            super().__init__()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._active: str = "routes"
         self._state: StateConfig | None = None
 
     def compose(self) -> ComposeResult:
-        yield Label("[b]Navigation[/b]", classes="section-title")
+        yield Static("[bold cyan]Devhost[/] Dashboard", id="app-title")
+        yield ListView(
+            *[ListItem(Static(f"{icon}  {label}"), id=f"nav-{sid}") for sid, icon, label in NAV_ITEMS],
+            id="nav-list",
+        )
         yield Static("", id="ownership-banner")
-        yield Tree("Devhost", id="nav-tree")
 
     def on_mount(self) -> None:
-        """Initialize the tree structure."""
-        tree = self.query_one(Tree)
-        tree.root.expand()
+        self._highlight_active()
 
-        # Add main sections
-        self._apps_node = tree.root.add("Apps", expand=True)
-        self._proxy_node = tree.root.add("Proxy", expand=True)
-        self._integrity_node = tree.root.add("Integrity", expand=True)
-        self._system_node = tree.root.add("System", expand=True)
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item_id = event.item.id
+        if item_id and item_id.startswith("nav-"):
+            screen_id = item_id.removeprefix("nav-")
+            self._active = screen_id
+            self._highlight_active()
+            self.post_message(self.ScreenSelected(screen_id))
 
-        # Add proxy status items
-        self._proxy_node.add_leaf("Mode: gateway")
-        self._proxy_node.add_leaf("Gateway: :7777")
+    def _highlight_active(self) -> None:
+        nav_list = self.query_one("#nav-list", ListView)
+        for item in nav_list.children:
+            if hasattr(item, "id") and item.id:
+                sid = item.id.removeprefix("nav-")
+                if sid == self._active:
+                    item.add_class("active")
+                else:
+                    item.remove_class("active")
 
-        # Add system items
-        self._system_node.add_leaf("Diagnostics")
-        self._system_node.add_leaf("Settings")
+    def set_active(self, screen_id: str) -> None:
+        self._active = screen_id
+        if self.is_mounted:
+            self._highlight_active()
 
     def update_state(
         self,
-        state: StateConfig,
+        state: StateConfig | None = None,
         integrity_results: dict | None = None,
         system_info: dict | None = None,
     ) -> None:
-        """Update sidebar with current state."""
+        """Update sidebar with current state summary."""
         self._state = state
         banner = self.query_one("#ownership-banner", Static)
+        if not state:
+            banner.update("")
+            return
         mode = state.proxy_mode
         if mode == "external":
-            owner_text = f"[yellow]External proxy (user-owned)[/yellow] • {state.external_driver}"
+            owner_text = f"[yellow]External proxy[/yellow] • {state.external_driver}"
         elif mode == "system":
-            owner_text = "[green]Devhost system proxy (owned)[/green]"
+            owner_text = "[green]System proxy (owned)[/green]"
         elif mode == "gateway":
-            owner_text = "[green]Devhost gateway (owned)[/green]"
+            owner_text = "[green]Gateway (owned)[/green]"
         elif mode == "off":
-            owner_text = "[dim]Proxy off (direct access)[/dim]"
+            owner_text = "[dim]Proxy off[/dim]"
         else:
-            owner_text = "[dim]Proxy ownership unknown[/dim]"
+            owner_text = "[dim]Unknown[/dim]"
         banner.update(owner_text)
 
-        # Clear and rebuild apps
-        self._apps_node.remove_children()
-        for name, route in state.routes.items():
-            enabled = route.get("enabled", True)
-            status = "●" if enabled else "○"
-            self._apps_node.add_leaf(f"{status} {name}")
 
-        # Update proxy info
-        self._proxy_node.remove_children()
-        self._proxy_node.add_leaf(f"Mode: {mode}")
-        if mode == "gateway":
-            self._proxy_node.add_leaf(f"Port: {state.gateway_port}")
-        elif mode == "system":
-            self._proxy_node.add_leaf("Port: 80/443")
-        elif mode == "external":
-            self._proxy_node.add_leaf(f"Driver: {state.external_driver}")
-
-        # Update integrity
-        self._integrity_node.remove_children()
-        results = integrity_results
-        if results is None and hasattr(state, "check_all_integrity"):
-            results = state.check_all_integrity()
-
-        if results is None:
-            self._integrity_node.add_leaf("…")
-        else:
-            issues = sum(1 for _, (ok, _) in results.items() if not ok)
-            if issues:
-                self._integrity_node.add_leaf(f"⚠ {issues} issues")
-            else:
-                self._integrity_node.add_leaf("✓ All OK")
-
-        # Update system info
-        self._system_node.remove_children()
-        info = system_info or {}
-        router_status = info.get("router_status", "unknown")
-        router_health = info.get("router_health", "unknown")
-        self._system_node.add_leaf(f"Router: {router_status}")
-        if info.get("router_pid"):
-            self._system_node.add_leaf(f"PID: {info['router_pid']}")
-        if info.get("router_uptime"):
-            self._system_node.add_leaf(f"Uptime: {info['router_uptime']}")
-        self._system_node.add_leaf(f"Health: {router_health}")
-        if info.get("last_probe"):
-            self._system_node.add_leaf(f"Last Probe: {info['last_probe']}")
-        self._system_node.add_leaf("Diagnostics")
-        self._system_node.add_leaf("Settings")
+# ---------------------------------------------------------------------------
+# StatusGrid
+# ---------------------------------------------------------------------------
 
 
 class StatusGrid(Static):
@@ -133,19 +148,14 @@ class StatusGrid(Static):
         yield DataTable(id="routes-table")
 
     def on_mount(self) -> None:
-        """Initialize the data table."""
         table = self.query_one(DataTable)
         table.cursor_type = "row"
         table.zebra_stripes = True
-
-        # Add columns
-        table.add_column("Status", key="status", width=6)
-        table.add_column("Name", key="name", width=15)
-        table.add_column("Mode", key="mode", width=10)
-        table.add_column("URL", key="url", width=30)
-        table.add_column("Upstream", key="upstream", width=20)
+        table.add_column("Name", key="name", width=18)
+        table.add_column("Domain", key="domain", width=30)
+        table.add_column("Target", key="target", width=25)
+        table.add_column("Status", key="status", width=14)
         table.add_column("Latency", key="latency", width=10)
-        table.add_column("Integrity", key="integrity", width=10)
 
     def update_routes(
         self,
@@ -156,7 +166,6 @@ class StatusGrid(Static):
         probe_results: dict | None = None,
         integrity_ok: bool | None = None,
     ) -> None:
-        """Update the routes table."""
         self._routes = routes
         self._mode = mode
         self._domain = domain
@@ -165,21 +174,21 @@ class StatusGrid(Static):
         table = self.query_one(DataTable)
         table.clear()
 
+        if not routes:
+            table.add_row("No routes configured", "", "", "", "", key="empty")
+            return
+
         for name, route in routes.items():
             enabled = route.get("enabled", True)
             upstream = route.get("upstream", "unknown")
             route_domain = route.get("domain", domain)
 
-            # Build URL based on mode
             if mode == "gateway":
-                url = f"http://{name}.{route_domain}:{gateway_port}"
-            elif mode == "system":
-                url = f"http://{name}.{route_domain}"
+                domain_display = f"{name}.{route_domain}:{gateway_port}"
             else:
-                url = f"http://{name}.{route_domain}"
+                domain_display = f"{name}.{route_domain}"
 
-            # Status indicator (use probe info when available)
-            status = "[green]●[/]" if enabled else "[dim]○[/]"
+            route_healthy = enabled
             latency_display = "-"
             if enabled and probe_results:
                 result = probe_results.get(name)
@@ -189,31 +198,21 @@ class StatusGrid(Static):
                     latency = result.get("latency_ms")
                     if latency is not None:
                         latency_display = f"{latency:.0f}ms"
-                    if route_ok is False or upstream_ok is False:
-                        status = "[red]●[/]"
-                    elif route_ok is True:
-                        status = "[green]●[/]"
-                    else:
-                        status = "[yellow]●[/]"
+                    route_healthy = route_ok is True and upstream_ok is not False
 
-            # Mode badge
-            mode_badge = f"[{mode}]"
-
-            if integrity_ok is None:
-                integrity = "[dim]...[/]"
+            if not enabled:
+                status_str = "[dim]● DISABLED[/dim]"
+            elif route_healthy:
+                status_str = "[green]● ONLINE[/green]"
             else:
-                integrity = "[green]OK[/]" if integrity_ok else "[yellow]DRIFT[/]"
+                status_str = "[red]● OFFLINE[/red]"
 
-            table.add_row(
-                status,
-                name,
-                mode_badge,
-                url,
-                upstream,
-                latency_display,
-                integrity,
-                key=name,
-            )
+            table.add_row(name, domain_display, upstream, status_str, latency_display, key=name)
+
+
+# ---------------------------------------------------------------------------
+# FlowDiagram
+# ---------------------------------------------------------------------------
 
 
 class FlowDiagram(Static):
@@ -229,7 +228,6 @@ class FlowDiagram(Static):
         yield Markdown("", id="flow-content")
 
     def show_flow(self, name: str, route: dict, mode: str, domain: str, gateway_port: int) -> None:
-        """Display traffic flow for a route."""
         self._route_name = name
         self._route = route
         self._mode = mode
@@ -238,51 +236,34 @@ class FlowDiagram(Static):
         route_domain = route.get("domain", domain)
         host = f"{name}.{route_domain}"
 
-        if mode == "off":
-            diagram = f"""
-```
-Mode: Awareness (off)
+        diagrams = {
+            "off": f"**Mode:** Awareness (off)\n\n"
+            f"    [Browser] ──({upstream.split(':')[-1]})──> [App: {name}]\n"
+            f"         │                                │\n"
+            f"         └── Direct connection ───────────┘\n",
+            "gateway": f"**Mode:** Gateway (port {gateway_port})\n\n"
+            f"    [Browser] ──({gateway_port})──> [Devhost] ──({upstream})──> [App: {name}]\n"
+            f"         │                  │                   │\n"
+            f"      Request          Route lookup         Upstream\n"
+            f"    Host: {host}\n",
+            "system": f"**Mode:** System (port 80/443)\n\n"
+            f"    [Browser] ──(80)──> [Devhost Caddy] ──({upstream})──> [App: {name}]\n"
+            f"         │                    │                   │\n"
+            f"      Request            TLS + Route          Upstream\n"
+            f"    Host: {host}\n",
+            "external": f"**Mode:** External\n\n"
+            f"    [Browser] ──(80)──> [External Proxy] ──({upstream})──> [App: {name}]\n"
+            f"         │                     │                      │\n"
+            f"      Request            User-managed            Upstream\n"
+            f"    Host: {host}\n",
+        }
+        diagram = diagrams.get(mode, "Unknown mode")
+        self.query_one("#flow-content", Markdown).update(diagram)
 
-[Browser] ──({upstream.split(":")[-1]})──> [App: {name}]
-    │                                │
-    └── Direct connection ───────────┘
-```
-"""
-        elif mode == "gateway":
-            diagram = f"""
-```
-Mode: Gateway (port {gateway_port})
 
-[Browser] ──({gateway_port})──> [Devhost Gateway] ──({upstream})──> [App: {name}]
-    │                       │                      │
-    Host: {host}      Route lookup           Upstream
-```
-"""
-        elif mode == "system":
-            diagram = f"""
-```
-Mode: System (port 80/443)
-
-[Browser] ──(80)──> [Devhost System Proxy] ──({upstream})──> [App: {name}]
-    │                       │                         │
-    Host: {host}      TLS termination           Upstream
-```
-"""
-        elif mode == "external":
-            diagram = f"""
-```
-Mode: External
-
-[Browser] ──(80)──> [External Proxy] ──({upstream})──> [App: {name}]
-    │                     │                      │
-    Host: {host}    User-managed           Upstream
-```
-"""
-        else:
-            diagram = "Unknown mode"
-
-        content = self.query_one("#flow-content", Markdown)
-        content.update(diagram)
+# ---------------------------------------------------------------------------
+# IntegrityPanel
+# ---------------------------------------------------------------------------
 
 
 class IntegrityPanel(Static):
@@ -297,8 +278,12 @@ class IntegrityPanel(Static):
     def compose(self) -> ComposeResult:
         yield Label("[b]Integrity Status[/b]", classes="section-title")
         yield DataTable(id="integrity-table")
+        yield Static(
+            "[dim]Accept: Update hash • Stop: Remove tracking • Diff: View changes • Restore: Revert[/dim]",
+            id="integrity-button-help",
+        )
         with Horizontal(id="integrity-actions"):
-            yield Button("Accept (Overwrite)", id="integrity-accept", variant="success")
+            yield Button("Accept", id="integrity-accept", variant="success")
             yield Button("Stop Tracking", id="integrity-ignore", variant="warning")
             yield Button("View Diff", id="integrity-diff", variant="default")
             yield Button("Restore Backup", id="integrity-restore", variant="warning")
@@ -306,7 +291,6 @@ class IntegrityPanel(Static):
         yield Static("Select a file to resolve drift.", id="integrity-help")
 
     def on_mount(self) -> None:
-        """Initialize the integrity table."""
         table = self.query_one(DataTable)
         table.add_column("File", width=50)
         table.add_column("Status", width=15)
@@ -314,8 +298,7 @@ class IntegrityPanel(Static):
         table.zebra_stripes = True
 
     def _update_help(self, message: str) -> None:
-        help_text = self.query_one("#integrity-help", Static)
-        help_text.update(message)
+        self.query_one("#integrity-help", Static).update(message)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row_key = event.row_key
@@ -366,7 +349,6 @@ class IntegrityPanel(Static):
         self._selected_path = None
 
     def update_integrity(self, state: StateConfig, results: dict | None = None) -> None:
-        """Update integrity status."""
         self._state = state
         table = self.query_one(DataTable)
         table.clear()
@@ -374,6 +356,7 @@ class IntegrityPanel(Static):
         results = results if results is not None else state.check_all_integrity()
         self._results = results
         self._selected_path = None
+
         if not results:
             self._update_help("No tracked files for integrity.")
         else:
@@ -382,14 +365,16 @@ class IntegrityPanel(Static):
                 self._update_help("Select a drifted file to resolve.")
             else:
                 self._update_help("No integrity issues detected.")
+
         for filepath, (ok, status) in results.items():
-            # Shorten the path for display
             short_path = filepath.replace(str(state.devhost_dir), "~/.devhost")
-            if ok:
-                status_display = f"[green]{status}[/]"
-            else:
-                status_display = f"[red]{status}[/]"
+            status_display = f"[green]{status}[/]" if ok else f"[red]{status}[/]"
             table.add_row(short_path, status_display, key=filepath)
+
+
+# ---------------------------------------------------------------------------
+# DetailsPane
+# ---------------------------------------------------------------------------
 
 
 class DetailsPane(Static):
@@ -421,19 +406,14 @@ class DetailsPane(Static):
                     yield Button("Copy Visible", id="logs-copy")
                 yield Label("Levels:", classes="field-label")
                 with Horizontal(id="logs-levels"):
-                    yield Button("All", id="logs-level-all")
-                    yield Button("Info", id="logs-level-info")
-                    yield Button("Warn", id="logs-level-warn")
-                    yield Button("Error", id="logs-level-error")
-                yield Static("Shortcuts: 0=All, 1=Info, 2=Warn, 3=Error", id="logs-level-help")
+                    yield Button("All", id="logs-level-all", classes="log-level-btn")
+                    yield Button("Info", id="logs-level-info", classes="log-level-btn")
+                    yield Button("Warn", id="logs-level-warn", classes="log-level-btn")
+                    yield Button("Error", id="logs-level-error", classes="log-level-btn")
                 yield Static("", id="logs-content")
             with TabPane("Config", id="tab-config"):
-                yield Markdown("", id="config-content")
-                with Horizontal(id="config-actions"):
-                    yield Button("External Proxy...", id="external-proxy")
-                    yield Button("Export Diagnostics (Redacted)", id="export-diagnostics")
-                    yield Button("Export Diagnostics (Raw)", id="export-diagnostics-raw")
-                    yield Button("Preview Diagnostics", id="preview-diagnostics")
+                with VerticalScroll(id="config-scroll"):
+                    yield Markdown("", id="config-content")
             with TabPane("Integrity", id="tab-integrity"):
                 yield IntegrityPanel(id="integrity-panel")
 
@@ -441,23 +421,37 @@ class DetailsPane(Static):
         self,
         name: str,
         route: dict,
-        state: StateConfig,
+        state,
         probe_results: dict | None = None,
         integrity_results: dict | None = None,
         integrity_state: StateConfig | None = None,
     ) -> None:
-        """Show details for a specific route."""
         self._current_route = name
         self._current_route_data = route
         self._state = state
 
-        # Update flow diagram
+        # Flow diagram
         flow = self.query_one(FlowDiagram)
         flow.show_flow(name, route, state.proxy_mode, state.system_domain, state.gateway_port)
 
-        # Update verify tab
+        # Verify tab
         verify = self.query_one("#verify-content", Static)
         upstream = route.get("upstream", "unknown")
+        upstreams = route.get("upstreams")
+        upstream_display = upstream
+        if isinstance(upstreams, list) and upstreams:
+            formatted = []
+            for entry in upstreams:
+                if isinstance(entry, dict):
+                    entry_type = str(entry.get("type", "tcp"))
+                    entry_target = str(entry.get("target", "")).strip()
+                    formatted.append(
+                        f"{entry_type}:{entry_target}" if entry_type != "tcp" else entry_target or "unknown"
+                    )
+                else:
+                    formatted.append(str(entry))
+            upstream_display = ", ".join(formatted) if formatted else upstream
+
         probe = probe_results.get(name) if probe_results else None
         if probe:
             route_ok = probe.get("route_ok")
@@ -473,18 +467,13 @@ class DetailsPane(Static):
             upstream_line = "OK" if upstream_ok else "FAIL" if upstream_ok is False else "UNKNOWN"
             lines = [
                 f"Route: {name}",
-                f"Upstream: {upstream}",
+                f"Upstream: {upstream_display}",
                 f"Upstream TCP: {upstream_line}",
                 f"Route Probe: {status_line}",
             ]
             if route_scheme and route_port:
                 lines.append(f"Probe Target: {route_scheme}://127.0.0.1:{route_port}")
-            lines.extend(
-                [
-                    f"Latency: {latency_text}",
-                    f"Last Checked: {last_checked or '-'}",
-                ]
-            )
+            lines.extend([f"Latency: {latency_text}", f"Last Checked: {last_checked or '-'}"])
             if upstream_error:
                 lines.append(f"Upstream Error: {upstream_error}")
             if route_error:
@@ -499,99 +488,87 @@ class DetailsPane(Static):
                     lines.append("Integrity: OK")
             verify.update("\n".join(lines))
         else:
-            verify.update(f"Route: {name}\\nUpstream: {upstream}\\n\\nPress Ctrl+P to probe")
+            verify.update(f"Route: {name}\nUpstream: {upstream_display}\n\nPress Ctrl+P to probe")
 
-        # Update config tab
+        # Config tab
         config = self.query_one("#config-content", Markdown)
         domain = route.get("domain", state.system_domain)
         enabled = route.get("enabled", True)
-        external_config = getattr(state, "external_config_path", None)
-        external_driver = getattr(state, "external_driver", "caddy")
+        persisted = integrity_state or StateConfig()
+        external_driver = getattr(state, "external_driver", None) or getattr(persisted, "external_driver", "caddy")
+        external_config = getattr(state, "external_config_path", None) or getattr(
+            persisted, "external_config_path", None
+        )
         external_path = str(external_config) if external_config else "Not set"
         snippet_driver = "caddy" if state.proxy_mode != "external" else external_driver
-        snippet_label = snippet_driver.capitalize()
         snippet_content = ""
         try:
-            from devhost_cli.proxy import generate_snippet
+            from devhost_cli.proxy import generate_snippet, route_spec_from_dict
 
-            snippet_content = generate_snippet(snippet_driver, {name: route}, domain)
+            default_domain = (integrity_state or state).system_domain
+            route_spec = route_spec_from_dict(name, route, default_domain)
+            snippet_content = generate_snippet(snippet_driver, [route_spec])
         except Exception:
             snippet_content = f"# Unable to generate {snippet_driver} snippet"
-        config_text = f"""
-## Route Configuration
+        config.update(
+            f"## Route Configuration\n\n"
+            f"**Name:** `{name}`\n"
+            f"**Upstream:** `{upstream_display}`\n"
+            f"**Domain:** `{domain}`\n"
+            f"**Enabled:** `{enabled}`\n\n"
+            f"### External Proxy\n"
+            f"**Driver:** `{external_driver}`\n"
+            f"**Config Path:** `{external_path}`\n\n"
+            f"### Generated {snippet_driver.capitalize()} Snippet\n```\n{snippet_content}\n```\n"
+        )
 
-**Name:** `{name}`
-**Upstream:** `{upstream}`
-**Domain:** `{domain}`
-**Enabled:** `{enabled}`
-
-### External Proxy
-**Driver:** `{external_driver}`
-**Config Path:** `{external_path}`
-
-### Generated {snippet_label} Snippet
-```
-{snippet_content}
-```
-"""
-        config.update(config_text)
-
-        # Update integrity panel
+        # Integrity panel
         integrity = self.query_one(IntegrityPanel)
         integrity.update_integrity(integrity_state or state, integrity_results)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "route-open":
-            if hasattr(self.app, "action_open_url"):
-                self.app.action_open_url()
-        if event.button.id == "route-copy-url":
-            if hasattr(self.app, "action_copy_url"):
-                self.app.action_copy_url()
-        if event.button.id == "route-copy-host":
-            if hasattr(self.app, "action_copy_host"):
-                self.app.action_copy_host()
-        if event.button.id == "route-copy-upstream":
-            if hasattr(self.app, "action_copy_upstream"):
-                self.app.action_copy_upstream()
-        if event.button.id == "external-proxy":
-            if hasattr(self.app, "action_external_proxy"):
-                self.app.action_external_proxy()
-        if event.button.id == "export-diagnostics":
-            if hasattr(self.app, "export_diagnostics"):
-                self.app.export_diagnostics(redact=True)
-        if event.button.id == "export-diagnostics-raw":
-            if hasattr(self.app, "export_diagnostics"):
-                self.app.export_diagnostics(redact=False)
-        if event.button.id == "preview-diagnostics":
-            if hasattr(self.app, "action_preview_diagnostics"):
-                self.app.action_preview_diagnostics()
-        if event.button.id == "logs-filter-apply":
+        button_to_action = {
+            "route-open": "action_open_url",
+            "route-copy-url": "action_copy_url",
+            "route-copy-host": "action_copy_host",
+            "route-copy-upstream": "action_copy_upstream",
+            "logs-filter-apply": None,
+            "logs-filter-clear": None,
+            "logs-copy": None,
+            "logs-level-all": None,
+            "logs-level-info": None,
+            "logs-level-warn": None,
+            "logs-level-error": None,
+        }
+
+        bid = event.button.id
+        if bid in ("route-open", "route-copy-url", "route-copy-host", "route-copy-upstream"):
+            action = button_to_action[bid]
+            if action and hasattr(self.app, action):
+                getattr(self.app, action)()
+        elif bid == "logs-filter-apply":
             if hasattr(self.app, "set_log_filter"):
-                input_widget = self.query_one("#logs-filter", Input)
-                self.app.set_log_filter(input_widget.value)
-        if event.button.id == "logs-filter-clear":
+                self.app.set_log_filter(self.query_one("#logs-filter", Input).value)
+        elif bid == "logs-filter-clear":
             if hasattr(self.app, "clear_log_filter"):
                 self.app.clear_log_filter()
-        if event.button.id == "logs-copy":
+        elif bid == "logs-copy":
             if hasattr(self.app, "copy_logs"):
                 self.app.copy_logs()
-        if event.button.id == "logs-level-all":
-            if hasattr(self.app, "set_log_levels"):
-                self.app.set_log_levels({"info", "warn", "error"})
-        if event.button.id == "logs-level-info":
-            if hasattr(self.app, "toggle_log_level"):
-                self.app.toggle_log_level("info")
-        if event.button.id == "logs-level-warn":
-            if hasattr(self.app, "toggle_log_level"):
-                self.app.toggle_log_level("warn")
-        if event.button.id == "logs-level-error":
-            if hasattr(self.app, "toggle_log_level"):
-                self.app.toggle_log_level("error")
+        elif bid in ("logs-level-all", "logs-level-info", "logs-level-warn", "logs-level-error"):
+            level_map = {
+                "logs-level-all": lambda: self.app.set_log_levels({"info", "warn", "error"}),
+                "logs-level-info": lambda: self.app.toggle_log_level("info"),
+                "logs-level-warn": lambda: self.app.toggle_log_level("warn"),
+                "logs-level-error": lambda: self.app.toggle_log_level("error"),
+            }
+            fn = level_map.get(bid)
+            if fn and hasattr(self.app, "set_log_levels"):
+                fn()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "logs-filter":
-            if hasattr(self.app, "set_log_filter"):
-                self.app.set_log_filter(event.value)
+        if event.input.id == "logs-filter" and hasattr(self.app, "set_log_filter"):
+            self.app.set_log_filter(event.value)
 
     def update_log_level_buttons(self, active: set[str]) -> None:
         try:

@@ -75,20 +75,41 @@ def hosts_backup() -> Path | None:
         return None
 
 
-def hosts_restore() -> bool:
+def hosts_restore(confirm: bool = True) -> bool:
     """Restore hosts file from backup.
+
+    Security:
+        - Requires admin privileges
+        - Optional confirmation gate
 
     Returns True if restore was successful.
     """
+    if not is_admin():
+        msg_error("Administrator privileges required to restore hosts file")
+        msg_info("Run in an elevated PowerShell/Command Prompt")
+        logger.error("hosts_restore failed: not running as admin")
+        return False
+
     path = hosts_path()
     backup_path = path.with_suffix(".bak")
     if not backup_path.exists():
+        msg_error(f"No hosts backup found at {backup_path}")
+        logger.error("hosts_restore failed: backup not found at %s", backup_path)
         return False
+
+    if confirm and not confirm_action("restore hosts file from backup", str(backup_path)):
+        logger.info("User cancelled hosts_restore from %s", backup_path)
+        return False
+
     try:
         content = backup_path.read_text(encoding="ascii", errors="ignore")
         path.write_text(content, encoding="ascii")
+        msg_success("Hosts file restored from backup")
+        logger.info("Successfully restored hosts file from %s", backup_path)
         return True
-    except Exception:
+    except Exception as exc:
+        msg_error(f"Failed to restore hosts file: {exc}")
+        logger.error("hosts_restore failed: %s", exc)
         return False
 
 

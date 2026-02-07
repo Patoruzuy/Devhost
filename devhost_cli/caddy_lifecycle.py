@@ -8,6 +8,7 @@ Implements the ownership model:
 - PID tracking in state.yml
 """
 
+import ipaddress
 import shutil
 import subprocess
 import time
@@ -44,6 +45,20 @@ def _run_subprocess(
         return subprocess.run(cmd, timeout=timeout, **kwargs), None
     except subprocess.TimeoutExpired:
         return None, f"Command timed out after {timeout}s: {_format_cmd(cmd)}"
+
+
+def _confirm_exposure(target: str, assume_yes: bool = False) -> bool:
+    if assume_yes:
+        return True
+    print_warning(f"About to expose Devhost on {target}")
+    print_warning("This makes the router accessible to other devices on your network.")
+    print_info("Rollback: devhost proxy expose --local")
+    try:
+        response = input("Continue? [y/N]: ").strip().lower()
+        return response in {"y", "yes"}
+    except (EOFError, KeyboardInterrupt):
+        print_info("\nOperation cancelled by user")
+        return False
 
 
 def find_caddy_executable() -> str | None:
@@ -732,6 +747,52 @@ def cmd_proxy_upgrade(to_mode: Literal["gateway", "system"]):
         return success
 
     return False
+
+
+def cmd_proxy_expose(mode: Literal["lan", "local"], iface: str | None = None, assume_yes: bool = False) -> bool:
+    """Handle 'devhost proxy expose' command."""
+    state = StateConfig()
+
+    if iface:
+        try:
+            addr = ipaddress.ip_address(iface)
+        except ValueError:
+            print_error(f"Invalid IP address: {iface}")
+            return False
+        if isinstance(addr, ipaddress.IPv6Address):
+            print_error("IPv6 interface binding is not supported. Use an IPv4 address.")
+            return False
+        target_host = iface
+    else:
+        target_host = "0.0.0.0" if mode == "lan" else "127.0.0.1"
+
+    if target_host != "127.0.0.1":
+        if not _confirm_exposure(target_host, assume_yes):
+            return False
+
+    try:
+        state.set_gateway_listen(target_host)
+        state.set_system_listen(target_host)
+    except ValueError as exc:
+        print_error(str(exc))
+        return False
+
+    gateway_listen = state.gateway_listen
+    system_http = state.raw.get("proxy", {}).get("system", {}).get("listen_http", "127.0.0.1:80")
+    system_https = state.raw.get("proxy", {}).get("system", {}).get("listen_https", "127.0.0.1:443")
+
+    print_success("Updated proxy bind addresses.")
+    print_info(f"Gateway listen: {gateway_listen}")
+    print_info(f"System HTTP listen: {system_http}")
+    print_info(f"System HTTPS listen: {system_https}")
+
+    print_info("Restart the router to apply gateway changes: devhost stop && devhost start")
+    if state.proxy_mode == "system":
+        print_info("Reload system proxy to apply changes: devhost proxy reload")
+    elif state.proxy_mode == "external":
+        print_info("External mode: update your proxy config separately.")
+
+    return True
 
 
 def cmd_proxy_reload():

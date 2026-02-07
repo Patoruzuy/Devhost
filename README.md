@@ -75,7 +75,11 @@ devhost open web
 - **Tunnel Integration**: Expose to internet with cloudflared/ngrok (one command)
 
 ### 🛠️ **Developer Experience**
-- **Interactive Dashboard**: TUI for visual management (`devhost dashboard`)
+- **Interactive Dashboard**: Feature-rich TUI with keyboard shortcuts, draft mode, and contextual help (`devhost dashboard`)
+  - Press `F1` for complete keyboard reference
+  - Visual progress bars and status indicators
+  - Safety confirmations and error boundaries
+  - Accessible design (screen reader friendly)
 - **OAuth Testing**: Stable redirect URLs that don't break when you restart
 - **Mobile Testing**: Access from your phone (`http://api.localhost:7777`)
 - **Framework Integration**: Drop-in support for Flask, FastAPI, Django

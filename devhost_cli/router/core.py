@@ -67,6 +67,73 @@ logger = logging.getLogger("devhost.router")
 
 
 _WS_HEADERS_PARAM: str | None = None
+_HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "proxy-connection",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+}
+
+
+def _sanitize_request_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Remove hop-by-hop and spoofable forwarding headers."""
+    connection_header = ""
+    for key, value in headers.items():
+        if key.lower() == "connection":
+            connection_header = value
+            break
+    connection_tokens = {token.strip().lower() for token in connection_header.split(",") if token.strip()}
+
+    sanitized: dict[str, str] = {}
+    for name, value in headers.items():
+        lname = name.lower()
+        if lname in _HOP_BY_HOP_HEADERS or lname in connection_tokens:
+            continue
+        if lname in {"forwarded", "x-real-ip"} or lname.startswith("x-forwarded-"):
+            continue
+        if "\r" in name or "\n" in name or "\r" in value or "\n" in value:
+            continue
+        sanitized[name] = value
+
+    # Let httpx compute content-length from the body we pass along.
+    for key in list(sanitized.keys()):
+        if key.lower() == "content-length":
+            sanitized.pop(key, None)
+    return sanitized
+
+
+def _sanitize_response_headers(headers: httpx.Headers | dict[str, str]) -> list[tuple[str, str]]:
+    connection_header = headers.get("connection", "")
+    connection_tokens = {token.strip().lower() for token in connection_header.split(",") if token.strip()}
+    excluded = _HOP_BY_HOP_HEADERS.union(connection_tokens)
+    sanitized: list[tuple[str, str]] = []
+
+    if hasattr(headers, "raw"):
+        raw_headers = headers.raw  # type: ignore[attr-defined]
+        for name_bytes, value_bytes in raw_headers:
+            name = name_bytes.decode("latin-1")
+            lname = name.lower()
+            if lname in excluded:
+                continue
+            # httpx may transparently decode compressed upstream bodies; avoid stale metadata.
+            if lname in {"content-encoding", "content-length"}:
+                continue
+            sanitized.append((name, value_bytes.decode("latin-1")))
+        return sanitized
+
+    for name, value in headers.items():
+        lname = name.lower()
+        if lname in excluded:
+            continue
+        if lname in {"content-encoding", "content-length"}:
+            continue
+        sanitized.append((name, value))
+    return sanitized
 
 
 def _ws_connect(url: str, extra_headers: list[tuple[str, str]] | None, subprotocols: list[str] | None):
@@ -384,6 +451,8 @@ def create_app() -> FastAPI:
                 "host",
                 "connection",
                 "upgrade",
+                "forwarded",
+                "x-real-ip",
                 "sec-websocket-key",
                 "sec-websocket-version",
                 "sec-websocket-extensions",
@@ -393,9 +462,17 @@ def create_app() -> FastAPI:
             for name_bytes, value_bytes in websocket.headers.raw:
                 name = name_bytes.decode("latin-1")
                 lname = name.lower()
-                if lname in skip_headers:
+                if lname in skip_headers or lname.startswith("x-forwarded-"):
                     continue
                 extra_headers.append((name, value_bytes.decode("latin-1")))
+
+            client_host = websocket.client.host if websocket.client else ""
+            if client_host:
+                extra_headers.append(("X-Forwarded-For", client_host))
+                extra_headers.append(("X-Real-IP", client_host))
+            extra_headers.append(("X-Forwarded-Host", host_header))
+            forwarded_proto = "https" if websocket.url.scheme == "wss" else "http"
+            extra_headers.append(("X-Forwarded-Proto", forwarded_proto))
 
             protocol_header = websocket.headers.get("sec-websocket-protocol")
             subprotocols = None
@@ -507,9 +584,16 @@ def create_app() -> FastAPI:
         if request.url.query:
             url = url + "?" + request.url.query
 
-        headers = dict(request.headers)
+        headers = _sanitize_request_headers(dict(request.headers))
         # remove host header so upstream sees correct host
         headers.pop("host", None)
+        # Overwrite forwarding headers to prevent spoofing
+        client_host = request.client.host if request.client else ""
+        if client_host:
+            headers["X-Forwarded-For"] = client_host
+            headers["X-Real-IP"] = client_host
+        headers["X-Forwarded-Host"] = host_header
+        headers["X-Forwarded-Proto"] = request.url.scheme
 
         try:
             proxy_resp = await request_with_retry(
@@ -526,19 +610,12 @@ def create_app() -> FastAPI:
             )
             return JSONResponse({"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502)
 
-        # Filter hop-by-hop headers
-        excluded = {
-            "connection",
-            "keep-alive",
-            "proxy-authenticate",
-            "proxy-authorization",
-            "te",
-            "trailers",
-            "transfer-encoding",
-            "upgrade",
-        }
-        resp_headers = {k: v for k, v in proxy_resp.headers.items() if k.lower() not in excluded}
+        # Filter hop-by-hop headers (including Connection-specified tokens)
+        resp_headers = _sanitize_response_headers(proxy_resp.headers)
 
-        return Response(content=proxy_resp.content, status_code=proxy_resp.status_code, headers=resp_headers)
+        response = Response(content=proxy_resp.content, status_code=proxy_resp.status_code)
+        for name, value in resp_headers:
+            response.headers.append(name, value)
+        return response
 
     return app

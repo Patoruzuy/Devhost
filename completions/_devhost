@@ -22,6 +22,7 @@ _devhost() {
     "stop:Stop router"
     "status:Router status"
     "install:Run installer"
+    "proxy:Proxy management"
   )
 
   _describe -t commands 'devhost commands' commands
@@ -50,7 +51,7 @@ PY
       fi
       ;;
     add)
-      _arguments '1:option:(--http --https)'
+      _arguments '1:option:(--http --https --upstream)'
       ;;
     list)
       _arguments '*:option:(--json)'
@@ -88,6 +89,59 @@ PY
       ;;
     caddy)
       _arguments '1:subcommand:(start stop restart status)'
+      ;;
+    proxy)
+      case $words[3] in
+        upgrade)
+          _arguments '*:option:(--to)'
+          ;;
+        expose)
+          _arguments '*:option:(--lan --local --iface --yes -y)'
+          ;;
+        export)
+          _arguments '*:option:(--driver -d --show -s --use-lock --lock-path)'
+          ;;
+        attach)
+          _arguments '1:driver:(caddy nginx traefik)' '*:option:(--config-path -c --no-validate --use-lock --lock-path)'
+          ;;
+        detach)
+          _arguments '*:option:(--config-path -c --force)'
+          ;;
+        drift)
+          _arguments '*:option:(--driver -d --config-path -c --validate --accept)'
+          ;;
+        validate)
+          _arguments '*:option:(--driver -d --config-path -c)'
+          ;;
+        lock)
+          case $words[4] in
+            write)
+              _arguments '*:option:(--path -p)'
+              ;;
+            apply)
+              _arguments '*:option:(--path -p --no-config)'
+              ;;
+            show)
+              _arguments '*:option:(--path -p)'
+              ;;
+            *)
+              _arguments '1:subcommand:(write apply show)'
+              ;;
+          esac
+          ;;
+        sync)
+          _arguments '*:option:(--driver -d --watch -w --interval --use-lock --lock-path)'
+          ;;
+        cleanup)
+          _arguments '*:option:(--system --external --lock --all --dry-run --yes -y)'
+          ;;
+        transfer)
+          _arguments '1:driver:(caddy nginx traefik)' '*:option:(--config-path -c --no-attach --no-verify --port -p)'
+          ;;
+        *)
+          _arguments '1:subcommand:(start stop status reload upgrade expose export discover attach detach drift validate lock sync cleanup transfer)'
+          ;;
+      esac
       ;;
   esac
 }

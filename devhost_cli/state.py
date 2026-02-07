@@ -47,6 +47,26 @@ DEFAULT_STATE: dict[str, Any] = {
 }
 
 
+def parse_listen(value: str | None, default_host: str, default_port: int) -> tuple[str, int]:
+    """Parse a listen address into (host, port)."""
+    if not value:
+        return (default_host, default_port)
+    text = str(value).strip()
+    if not text:
+        return (default_host, default_port)
+    if text.startswith("[") and "]" in text:
+        host, _, remainder = text[1:].partition("]")
+        if remainder.startswith(":") and remainder[1:].isdigit():
+            return (host or default_host, int(remainder[1:]))
+        return (host or default_host, default_port)
+    if ":" in text:
+        host, port_str = text.rsplit(":", 1)
+        if port_str.isdigit():
+            return (host or default_host, int(port_str))
+        return (host or default_host, default_port)
+    return (text, default_port)
+
+
 def get_devhost_dir() -> Path:
     """Get the ~/.devhost directory path"""
     return Path.home() / ".devhost"
@@ -177,6 +197,38 @@ class StateConfig:
             return int(listen.split(":")[-1])
         return 7777
 
+    def set_gateway_listen(self, host: str, port: int | None = None) -> None:
+        """Set gateway listen address."""
+        host = (host or "").strip()
+        if not host or any(c in host for c in ("\r", "\n", "\x00")):
+            raise ValueError("Invalid gateway listen host")
+        _, current_port = parse_listen(self.gateway_listen, "127.0.0.1", 7777)
+        port = current_port if port is None else port
+        if not (1 <= int(port) <= 65535):
+            raise ValueError("Invalid gateway listen port")
+        self._state.setdefault("proxy", {}).setdefault("gateway", {})["listen"] = f"{host}:{int(port)}"
+        self._save()
+
+    def set_system_listen(self, host: str, http_port: int | None = None, https_port: int | None = None) -> None:
+        """Set system proxy listen addresses (HTTP/HTTPS)."""
+        host = (host or "").strip()
+        if not host or any(c in host for c in ("\r", "\n", "\x00")):
+            raise ValueError("Invalid system listen host")
+        system = self._state.setdefault("proxy", {}).setdefault("system", {})
+        current_http = system.get("listen_http", "127.0.0.1:80")
+        current_https = system.get("listen_https", "127.0.0.1:443")
+        _, current_http_port = parse_listen(current_http, "127.0.0.1", 80)
+        _, current_https_port = parse_listen(current_https, "127.0.0.1", 443)
+        http_port = current_http_port if http_port is None else http_port
+        https_port = current_https_port if https_port is None else https_port
+        if not (1 <= int(http_port) <= 65535):
+            raise ValueError("Invalid system HTTP listen port")
+        if not (1 <= int(https_port) <= 65535):
+            raise ValueError("Invalid system HTTPS listen port")
+        system["listen_http"] = f"{host}:{int(http_port)}"
+        system["listen_https"] = f"{host}:{int(https_port)}"
+        self._save()
+
     @property
     def system_domain(self) -> str:
         """Get system proxy domain"""
@@ -216,15 +268,24 @@ class StateConfig:
         return self.routes.get(name)
 
     def set_route(
-        self, name: str, upstream: str, domain: str = "localhost", enabled: bool = True, tags: list | None = None
+        self,
+        name: str,
+        upstream: str,
+        domain: str = "localhost",
+        enabled: bool = True,
+        tags: list | None = None,
+        upstreams: list[dict] | None = None,
     ):
         """Add or update a route"""
-        self._state.setdefault("routes", {})[name] = {
+        route = {
             "upstream": upstream,
             "domain": domain,
             "enabled": enabled,
             "tags": tags or [],
         }
+        if upstreams:
+            route["upstreams"] = upstreams
+        self._state.setdefault("routes", {})[name] = route
         self._save()
 
     def remove_route(self, name: str) -> bool:
