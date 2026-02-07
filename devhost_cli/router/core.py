@@ -9,6 +9,8 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
+from typing import Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -26,7 +28,11 @@ try:
 except Exception:  # pragma: no cover
 
     def validate_upstream_target(host: str, port: int) -> tuple[bool, str | None]:
-        return (True, None)
+        # Fail closed: if SSRF validation cannot be imported, only allow loopback upstreams.
+        normalized = (host or "").strip().lower()
+        if normalized in {"127.0.0.1", "localhost", "::1", "[::1]"}:
+            return (True, None)
+        return (False, "Security module unavailable; only loopback upstreams are allowed")
 
 
 # Optional WebSocket client support (for WebSocket proxying)
@@ -80,6 +86,24 @@ _HOP_BY_HOP_HEADERS = {
 }
 
 
+def _redact_url_for_logs(url: str) -> str:
+    """
+    Redact sensitive URL components for logging.
+
+    - Drops query string + fragment (common place for OAuth codes/tokens)
+    - Removes userinfo (user:pass@host) if present
+    """
+    try:
+        parts = urlsplit(url)
+        netloc = parts.netloc
+        if "@" in netloc:
+            netloc = netloc.split("@", 1)[1]
+        return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+    except Exception:
+        # Best-effort: avoid logging the raw URL if parsing fails.
+        return "[unparseable-url]"
+
+
 def _sanitize_request_headers(headers: dict[str, str]) -> dict[str, str]:
     """Remove hop-by-hop and spoofable forwarding headers."""
     connection_header = ""
@@ -107,7 +131,7 @@ def _sanitize_request_headers(headers: dict[str, str]) -> dict[str, str]:
     return sanitized
 
 
-def _sanitize_response_headers(headers: httpx.Headers | dict[str, str]) -> list[tuple[str, str]]:
+def _sanitize_response_headers(headers: httpx.Headers | Mapping[str, str]) -> list[tuple[str, str]]:
     connection_header = headers.get("connection", "")
     connection_tokens = {token.strip().lower() for token in connection_header.split(",") if token.strip()}
     excluded = _HOP_BY_HOP_HEADERS.union(connection_tokens)
@@ -123,16 +147,23 @@ def _sanitize_response_headers(headers: httpx.Headers | dict[str, str]) -> list[
             # httpx may transparently decode compressed upstream bodies; avoid stale metadata.
             if lname in {"content-encoding", "content-length"}:
                 continue
-            sanitized.append((name, value_bytes.decode("latin-1")))
+            value = value_bytes.decode("latin-1")
+            if "\r" in name or "\n" in name or "\r" in value or "\n" in value:
+                continue
+            sanitized.append((name, value))
         return sanitized
 
     for name, value in headers.items():
-        lname = name.lower()
+        lname = str(name).lower()
         if lname in excluded:
             continue
         if lname in {"content-encoding", "content-length"}:
             continue
-        sanitized.append((name, value))
+        name_s = str(name)
+        value_s = str(value)
+        if "\r" in name_s or "\n" in name_s or "\r" in value_s or "\n" in value_s:
+            continue
+        sanitized.append((name_s, value_s))
     return sanitized
 
 
@@ -156,6 +187,18 @@ def _ws_connect(url: str, extra_headers: list[tuple[str, str]] | None, subprotoc
             kwargs[_WS_HEADERS_PARAM] = extra_headers
 
     return websockets.connect(url, **kwargs)  # type: ignore[name-defined]
+
+
+def _is_loopback_client(client_host: str) -> bool:
+    normalized = (client_host or "").strip().lower()
+    return normalized in {"127.0.0.1", "localhost", "::1"}
+
+
+def _debug_endpoints_allowed(request: Request) -> bool:
+    client_host = request.client.host if request.client else ""
+    if client_host and _is_loopback_client(client_host):
+        return True
+    return os.getenv("DEVHOST_DEBUG_ENDPOINTS", "0").lower() in {"1", "true", "yes", "on"}
 
 
 def create_app() -> FastAPI:
@@ -330,18 +373,23 @@ def create_app() -> FastAPI:
         return JSONResponse(response_data)
 
     @app.get("/metrics")
-    async def metrics_endpoint():
+    async def metrics_endpoint(request: Request):
         """Basic request metrics with connection pool stats and route cache stats."""
+        if not _debug_endpoints_allowed(request):
+            return JSONResponse({"error": "Not found"}, status_code=404)
         data = metrics.snapshot()
         data["connection_pool"] = get_pool_metrics()
         data["route_cache"] = route_cache.get_metrics()  # Phase 4 L-15
         return JSONResponse(data)
 
     @app.get("/routes")
-    async def routes_endpoint():
-        """Return current routes with parsed targets."""
+    async def routes_endpoint(request: Request):
+        """Return current routes with parsed targets (loopback-only by default)."""
+        if not _debug_endpoints_allowed(request):
+            return JSONResponse({"error": "Not found"}, status_code=404)
         routes_map = await route_cache.get_routes()
         domain = load_domain()
+        include_raw = os.getenv("DEVHOST_ROUTES_INCLUDE_RAW", "0").lower() in {"1", "true", "yes", "on"}
         output = {}
         for name, target_value in routes_map.items():
             target = parse_target(target_value)
@@ -352,8 +400,9 @@ def create_app() -> FastAPI:
             output[name] = {
                 "url": f"{scheme}://{name}.{domain}",
                 "target": f"{scheme}://{host}:{port}",
-                "raw": target_value,
             }
+            if include_raw:
+                output[name]["raw"] = target_value
         return JSONResponse({"domain": domain, "routes": output})
 
     async def _check_tcp(host: str, port: int, timeout: float = 0.5) -> bool:
@@ -368,8 +417,10 @@ def create_app() -> FastAPI:
             return False
 
     @app.get("/mappings")
-    async def mappings():
-        """Return current mappings with basic TCP health checks."""
+    async def mappings(request: Request):
+        """Return current mappings with basic TCP health checks (loopback-only by default)."""
+        if not _debug_endpoints_allowed(request):
+            return JSONResponse({"error": "Not found"}, status_code=404)
         routes = await route_cache.get_routes()
         results = {}
         checks = []
@@ -439,7 +490,13 @@ def create_app() -> FastAPI:
         if websocket.url.query:
             upstream_url = f"{upstream_url}?{websocket.url.query}"
 
-        logger.info("[%s] WebSocket connection: %s.%s -> %s", request_id, subdomain, base_domain, upstream_url)
+        logger.info(
+            "[%s] WebSocket connection: %s.%s -> %s",
+            request_id,
+            subdomain,
+            base_domain,
+            _redact_url_for_logs(upstream_url),
+        )
 
         await websocket.accept()
 
@@ -464,7 +521,12 @@ def create_app() -> FastAPI:
                 lname = name.lower()
                 if lname in skip_headers or lname.startswith("x-forwarded-"):
                     continue
-                extra_headers.append((name, value_bytes.decode("latin-1")))
+                if lname in _HOP_BY_HOP_HEADERS:
+                    continue
+                value = value_bytes.decode("latin-1")
+                if "\r" in name or "\n" in name or "\r" in value or "\n" in value:
+                    continue
+                extra_headers.append((name, value))
 
             client_host = websocket.client.host if websocket.client else ""
             if client_host:
@@ -606,9 +668,14 @@ def create_app() -> FastAPI:
         except httpx.RequestError as exc:
             request_id = str(uuid.uuid4())[:8]
             logger.warning(
-                "[%s] Upstream request failed for %s.%s -> %s: %s", request_id, subdomain, base_domain, url, exc
+                "[%s] Upstream request failed for %s.%s -> %s: %s",
+                request_id,
+                subdomain,
+                base_domain,
+                _redact_url_for_logs(url),
+                exc,
             )
-            return JSONResponse({"error": f"Upstream request failed: {exc}", "request_id": request_id}, status_code=502)
+            return JSONResponse({"error": "Upstream request failed", "request_id": request_id}, status_code=502)
 
         # Filter hop-by-hop headers (including Connection-specified tokens)
         resp_headers = _sanitize_response_headers(proxy_resp.headers)

@@ -62,16 +62,47 @@ def validate_upstream_target(host: str, port: int) -> tuple[bool, str | None]:
         if ip_obj.is_loopback:
             continue
 
+        # Handle IPv4-mapped IPv6 explicitly so error messages stay specific.
         if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
             mapped = ip_obj.ipv4_mapped
             if mapped.is_loopback:
                 continue
+            if mapped.is_multicast or mapped.is_unspecified or mapped.is_reserved:
+                logger.warning("Blocked unsafe IPv4-mapped IP: %s (%s) from %s", mapped, ip_str, host)
+                return (
+                    False,
+                    f"Target {host} resolves to an unsafe IPv4-mapped address {mapped} (SSRF protection).",
+                )
+            if not getattr(mapped, "is_global", False):
+                logger.warning("Blocked non-global IPv4-mapped IP: %s (%s) from %s", mapped, ip_str, host)
+                return (
+                    False,
+                    f"Target {host} resolves to non-public IPv4-mapped IP {mapped} (SSRF protection). Use DEVHOST_ALLOW_PRIVATE_NETWORKS=1 to override.",
+                )
             if mapped.is_private or mapped.is_link_local:
                 logger.warning("Blocked private IPv4-mapped IP: %s (%s) from %s", mapped, ip_str, host)
                 return (
                     False,
                     f"Target {host} resolves to private IPv4-mapped IP {mapped} (SSRF protection). Use DEVHOST_ALLOW_PRIVATE_NETWORKS=1 to override.",
                 )
+            continue
+
+        # Block obviously unsafe IP categories (even if not "private")
+        if ip_obj.is_multicast or ip_obj.is_unspecified or ip_obj.is_reserved:
+            logger.warning("Blocked unsafe IP category: %s (%s)", host, ip_str)
+            return (
+                False,
+                f"Target {host} resolves to an unsafe address {ip_str} (SSRF protection).",
+            )
+
+        # Treat any non-global address as non-public (e.g. carrier-grade NAT 100.64.0.0/10).
+        is_global = getattr(ip_obj, "is_global", False)
+        if not is_global:
+            logger.warning("Blocked non-global IP: %s (%s)", host, ip_str)
+            return (
+                False,
+                f"Target {host} resolves to non-public IP {ip_str} (SSRF protection). Use DEVHOST_ALLOW_PRIVATE_NETWORKS=1 to override.",
+            )
 
         for network in BLOCKED_NETWORKS:
             if ip_obj in network:

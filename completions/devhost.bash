@@ -127,7 +127,7 @@ PY
             return 0
             ;;
         hosts)
-            COMPREPLY=( $(compgen -W "sync clear" -- "$cur") )
+            COMPREPLY=( $(compgen -W "sync clear restore" -- "$cur") )
             return 0
             ;;
         caddy)

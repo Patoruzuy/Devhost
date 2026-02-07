@@ -97,7 +97,7 @@ class TestExecutableValidation(unittest.TestCase):
 
         # Only test if the file actually exists
         if test_path.exists():
-            is_writable = is_user_writable(test_path)
+            is_writable, _ = is_user_writable(test_path)
             self.assertFalse(is_writable)  # System paths should not be user-writable
 
     def test_find_python_in_path(self):
@@ -198,7 +198,8 @@ class TestIsUserWritable(unittest.TestCase):
         try:
             # Make world-writable
             path.chmod(0o777)
-            self.assertTrue(is_user_writable(path))
+            is_writable, _ = is_user_writable(path)
+            self.assertTrue(is_writable)
         finally:
             path.unlink()
 
@@ -211,7 +212,8 @@ class TestIsUserWritable(unittest.TestCase):
         try:
             # Make group-writable
             path.chmod(0o775)
-            self.assertTrue(is_user_writable(path))
+            is_writable, _ = is_user_writable(path)
+            self.assertTrue(is_writable)
         finally:
             path.unlink()
 

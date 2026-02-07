@@ -119,7 +119,7 @@ Supported providers: `cloudflared`, `ngrok`, `localtunnel`.
 
 - `devhost hosts sync`: Synchronizes your Devhost routes with the Windows `hosts` file (requires Administrator privileges).
 - `devhost hosts clear`: Removes all Devhost-managed entries from the `hosts` file.
-- `devhost hosts restore`: Restores the Windows `hosts` file from the `.bak` rollback backup.
+- `devhost hosts restore`: Restores the Windows `hosts` file from the `.bak` rollback backup (requires Administrator privileges; confirmation prompt unless `--yes`).
 
 ## TUI Dashboard
 

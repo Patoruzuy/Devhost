@@ -227,6 +227,7 @@ def main():
     # hosts command (Windows)
     hosts_parser = subparsers.add_parser("hosts", help="Manage Windows hosts entries")
     hosts_parser.add_argument("action", choices=["sync", "clear", "restore"])
+    hosts_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
     # caddy command (Windows)
     caddy_parser = subparsers.add_parser("caddy", help="Manage Caddy (Windows)")
@@ -528,11 +529,11 @@ def main():
                 success = False
             else:
                 if args.action == "sync":
-                    hosts_sync()
+                    hosts_sync(confirm=not args.yes)
                 elif args.action == "clear":
-                    hosts_clear()
+                    hosts_clear(confirm=not args.yes)
                 else:
-                    hosts_restore()
+                    hosts_restore(confirm=not args.yes)
                 success = True
         elif args.command == "caddy":
             if not IS_WINDOWS:

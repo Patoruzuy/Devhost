@@ -85,7 +85,7 @@ PY
       esac
       ;;
     hosts)
-      _arguments '1:subcommand:(sync clear)'
+      _arguments '1:subcommand:(sync clear restore)'
       ;;
     caddy)
       _arguments '1:subcommand:(start stop restart status)'

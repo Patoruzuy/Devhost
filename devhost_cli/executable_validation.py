@@ -35,18 +35,18 @@ SAFE_EXECUTABLE_DIRS = {
 }
 
 
-def is_user_writable(path: Path) -> bool:
+def is_user_writable(path: Path) -> tuple[bool, str | None]:
     """
     Check if a path is in a user-writable location.
 
-    Returns True if the path is potentially unsafe (user can modify it).
-    Returns False if the path is in a system-controlled location.
+    Returns (True, reason) if the path is potentially unsafe (user can modify it).
+    Returns (False, None) if the path is in a system-controlled location.
 
     Args:
         path: Path to check
 
     Returns:
-        True if user-writable (unsafe), False if system-controlled (safe)
+        (is_writable, reason): Tuple of (bool, optional reason string)
     """
     try:
         path_str = str(path.resolve())
@@ -58,17 +58,17 @@ def is_user_writable(path: Path) -> bool:
 
             # If owned by current user, treat as user-writable regardless of location
             if path_stat.st_uid == os.getuid():
-                return True
+                return True, "File is owned by current user"
 
             # If world-writable or group-writable, consider unsafe
             if mode & stat.S_IWOTH:  # World-writable
-                return True
+                return True, "File is world-writable"
             if mode & stat.S_IWGRP:  # Group-writable
-                return True
+                return True, "File is group-writable"
 
             # If user can write the file directly, consider unsafe
             if os.access(path, os.W_OK):
-                return True
+                return True, "File is writable by current user"
 
             # If any parent directory is user-writable and not sticky, consider unsafe
             for parent in [path.parent, *path.parents]:
@@ -79,25 +79,25 @@ def is_user_writable(path: Path) -> bool:
                 if os.access(parent, os.W_OK):
                     # Sticky bit (e.g., /tmp) reduces replacement risk for non-owned files
                     if not (parent_stat.st_mode & stat.S_ISVTX):
-                        return True
+                        return True, f"Parent directory is writable: {parent}"
 
         # On Windows, check if in user profile directory
         if sys.platform == "win32":
             userprofile = os.environ.get("USERPROFILE", "")
             if userprofile and path_str.startswith(userprofile):
-                return True
+                return True, "File is in user profile directory"
 
         # Check if in a known safe directory (only after writability checks)
         for safe_dir in SAFE_EXECUTABLE_DIRS:
             if path_str.startswith(safe_dir):
-                return False
+                return False, None
 
         # Default to safe if we can't determine otherwise
-        return False
+        return False, None
 
-    except (OSError, PermissionError):
+    except (OSError, PermissionError) as e:
         # If we can't stat the file, assume it's unsafe
-        return True
+        return True, f"Cannot stat file: {e}"
 
 
 def validate_executable(executable_path: str, check_writability: bool = True) -> tuple[bool, str | None]:
@@ -158,11 +158,14 @@ def validate_executable(executable_path: str, check_writability: bool = True) ->
             return False, f"File is not executable: {executable_path}"
 
         # Check writability (security risk)
-        if check_writability and is_user_writable(path):
-            return False, (
-                f"Executable is in a user-writable location: {path}\n"
-                f"This is a security risk - use system-installed executables instead."
-            )
+        if check_writability:
+            is_writable, reason = is_user_writable(path)
+            if is_writable:
+                return False, (
+                    f"Executable is in a user-writable location: {path}\n"
+                    f"Reason: {reason}\n"
+                    f"This is a security risk - use system-installed executables instead."
+                )
 
         return True, None
 

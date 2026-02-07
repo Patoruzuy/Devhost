@@ -49,8 +49,17 @@ def extract_subdomain(host_header: str | None, base_domain: str | None = None) -
     base_domain = (base_domain or load_domain()).strip(".").lower()
     if not base_domain:
         return None
-    # strip port if present
-    host_only = host_header.split(":")[0].strip().lower()
+
+    # Strip port if present (handle bracketed IPv6 literals like "[::1]:7777").
+    host_only = host_header.strip()
+    if host_only.startswith("["):
+        end = host_only.find("]")
+        if end == -1:
+            return None
+        host_only = host_only[1:end]
+    elif ":" in host_only:
+        host_only = host_only.rsplit(":", 1)[0]
+    host_only = host_only.strip().lower()
 
     # Security: Validate hostname for control characters and RFC compliance
     try:
