@@ -7,6 +7,5 @@ import sys
 
 from devhost_cli.installer import main
 
-
 if __name__ == "__main__":
     sys.exit(main())

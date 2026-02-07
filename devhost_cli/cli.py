@@ -753,7 +753,7 @@ class DevhostCLI:
 
     def scan(self, json_output: bool = False):
         """Scan for listening ports on the system (ghost port detection)."""
-        from devhost_cli.scanner import detect_framework, format_port_list, get_common_dev_ports, scan_listening_ports
+        from devhost_cli.scanner import detect_framework, get_common_dev_ports, scan_listening_ports
 
         msg_info("Scanning for listening ports...")
         ports = scan_listening_ports(exclude_system=True)

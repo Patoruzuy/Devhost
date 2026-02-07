@@ -1,7 +1,6 @@
 """Main entry point for devhost CLI"""
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
@@ -10,7 +9,16 @@ from .cli import DevhostCLI
 from .config import YAML_AVAILABLE, Config
 from .platform import IS_WINDOWS, is_admin, relaunch_as_admin
 from .utils import msg_error, msg_info, msg_success, msg_warning
-from .windows import caddy_restart, caddy_start, caddy_status, caddy_stop, doctor_windows, hosts_clear, hosts_restore, hosts_sync
+from .windows import (
+    caddy_restart,
+    caddy_start,
+    caddy_status,
+    caddy_stop,
+    doctor_windows,
+    hosts_clear,
+    hosts_restore,
+    hosts_sync,
+)
 
 
 def handle_init(args) -> bool:
@@ -577,12 +585,12 @@ def main():
                 success = False
         elif args.command == "proxy":
             from .caddy_lifecycle import (
+                cmd_proxy_expose,
                 cmd_proxy_reload,
                 cmd_proxy_start,
                 cmd_proxy_status,
                 cmd_proxy_stop,
                 cmd_proxy_upgrade,
-                cmd_proxy_expose,
             )
             from .proxy import (
                 cmd_proxy_attach,

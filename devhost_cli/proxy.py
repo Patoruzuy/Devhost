@@ -9,21 +9,22 @@ Provides snippet generation, attach/detach, discovery, and transfer for:
 
 import hashlib
 import json
-import os
 import re
 import shutil
-import time
 import subprocess
+import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Literal
 from urllib.parse import urlparse
 
 import httpx
 
 from devhost_cli import __version__
 from devhost_cli.config import Config
+
 from .output import console, print_error, print_info, print_success, print_warning
 from .state import StateConfig
 from .validation import parse_target
@@ -775,7 +776,9 @@ def detach_from_config(state: StateConfig, config_path: Path, *, force: bool = F
     if not has_marker_block(content):
         return (False, "No devhost marker block found in config")
 
-    snippet_path = state.devhost_dir / "proxy" / state.external_driver / f"devhost.{_get_extension(state.external_driver)}"
+    snippet_path = (
+        state.devhost_dir / "proxy" / state.external_driver / f"devhost.{_get_extension(state.external_driver)}"
+    )
     manifest = _load_manifest(snippet_path) if snippet_path.exists() else None
     expected_block = None
     if manifest and manifest.get("attach", {}).get("marker_block"):
@@ -1238,20 +1241,9 @@ def cmd_proxy_discover():
     print_discovery_results(results)
 
 
-def cmd_proxy_attach(
-    driver: str,
-    config_path: str | None = None,
-    *,
-    no_validate: bool = False,
-    use_lock: bool = False,
-    lock_path: Path | None = None,
-):
+def cmd_proxy_attach(driver: str, config_path: str | None = None):
     """Handle 'devhost proxy attach' command."""
     state = StateConfig()
-
-    if use_lock and lock_path and not lock_path.exists():
-        print_error(f"Lockfile not found: {lock_path}")
-        return
 
     if config_path:
         path = Path(config_path)
@@ -1268,17 +1260,7 @@ def cmd_proxy_attach(
             return
         path = found[0][1]
 
-    if use_lock:
-        export_snippets(state, [driver], use_lock=use_lock, lock_path=lock_path)
-
-    success, msg = attach_to_config(
-        state,
-        path,
-        driver,
-        validate=not no_validate,
-        use_lock=use_lock,
-        lock_path=lock_path,
-    )
+    success, msg = attach_to_config(state, path, driver)
     if success:
         print_success(msg)
         print_info("\nRemember to reload your proxy to apply changes.")
@@ -1286,7 +1268,7 @@ def cmd_proxy_attach(
         print_error(msg)
 
 
-def cmd_proxy_detach(config_path: str | None = None, *, force: bool = False):
+def cmd_proxy_detach(config_path: str | None = None):
     """Handle 'devhost proxy detach' command."""
     state = StateConfig()
 
@@ -1299,211 +1281,11 @@ def cmd_proxy_detach(config_path: str | None = None, *, force: bool = False):
             print_error("No external config path configured. Specify --config-path.")
             return
 
-    success, msg = detach_from_config(state, path, force=force)
+    success, msg = detach_from_config(state, path)
     if success:
         print_success(msg)
     else:
         print_error(msg)
-
-
-def cmd_proxy_drift(
-    *,
-    driver: str | None = None,
-    config_path: str | None = None,
-    validate: bool = False,
-    accept: bool = False,
-) -> None:
-    """Handle 'devhost proxy drift' command."""
-    state = StateConfig()
-    drv: ProxyDriver = driver or state.external_driver or "caddy"
-    path = Path(config_path) if config_path else state.external_config_path
-
-    if accept:
-        ok, msg = accept_proxy_drift(state, drv, path)
-        if ok:
-            print_success(msg)
-        else:
-            print_error(msg)
-        return
-
-    report = check_proxy_drift(state, drv, path, validate=validate)
-    if report.get("ok"):
-        print_success("No drift detected.")
-        return
-
-    print_warning("Drift detected:")
-    for issue in report.get("issues", []):
-        code = issue.get("code", "unknown")
-        message = issue.get("message", "")
-        fix = issue.get("fix")
-        line = f"  - {code}: {message}"
-        if fix:
-            line += f" (fix: {fix})"
-        console.print(line)
-
-
-def cmd_proxy_validate(driver: str | None = None, config_path: str | None = None) -> None:
-    """Handle 'devhost proxy validate' command."""
-    state = StateConfig()
-    drv: ProxyDriver = driver or state.external_driver or "caddy"
-    path = Path(config_path) if config_path else state.external_config_path
-    if not path:
-        print_error("No config path provided. Use --config-path.")
-        return
-
-    ok, msg = validate_proxy_config(drv, path)
-    if ok:
-        print_success(f"Validation OK: {msg}")
-    else:
-        print_error(f"Validation failed: {msg}")
-
-
-def cmd_proxy_lock(action: str | None, *, path: str | None = None, no_config: bool = False) -> None:
-    """Handle 'devhost proxy lock' command."""
-    state = StateConfig()
-    lock_path = Path(path) if path else None
-    if action == "write":
-        out = write_lockfile(state, lock_path)
-        print_success(f"Lockfile written: {out}")
-        return
-    if action == "apply":
-        ok, msg = apply_lockfile(state, lock_path, update_config=not no_config)
-        if ok:
-            print_success(msg)
-        else:
-            print_error(msg)
-        return
-    if action == "show":
-        show_path = lock_path or _lockfile_path()
-        if not show_path.exists():
-            print_error(f"Lockfile not found: {show_path}")
-            return
-        console.print(show_path.read_text(encoding="utf-8"))
-        return
-
-    print_info("Usage: devhost proxy lock {write|apply|show}")
-
-
-def cmd_proxy_sync(
-    *,
-    driver: str | None = None,
-    watch: bool = False,
-    interval: float = 2.0,
-    use_lock: bool = False,
-    lock_path: Path | None = None,
-) -> None:
-    """Handle 'devhost proxy sync' command."""
-    state = StateConfig()
-    drv: ProxyDriver = driver or state.external_driver or "caddy"
-    if use_lock and lock_path and not lock_path.exists():
-        print_error(f"Lockfile not found: {lock_path}")
-        return
-
-    if watch:
-        print_info("Watching for route changes. Press Ctrl+C to stop.")
-    sync_proxy(state, drv, watch=watch, interval=interval, use_lock=use_lock, lock_path=lock_path)
-
-
-def _cleanup_targets(
-    state: StateConfig,
-    *,
-    include_system: bool,
-    include_external: bool,
-    include_lock: bool,
-) -> list[Path]:
-    paths: list[Path] = []
-    if include_system:
-        paths.append(state.devhost_dir / "proxy" / "caddy" / "Caddyfile")
-    if include_external:
-        extensions = {"caddy": "caddy", "nginx": "conf", "traefik": "yml"}
-        for driver, ext in extensions.items():
-            snippet = state.devhost_dir / "proxy" / driver / f"devhost.{ext}"
-            paths.append(snippet)
-            paths.append(snippet.with_suffix(snippet.suffix + ".manifest.json"))
-    if include_lock:
-        paths.append(_lockfile_path())
-    # De-duplicate and keep only existing files
-    seen: set[Path] = set()
-    existing: list[Path] = []
-    for path in paths:
-        if path in seen:
-            continue
-        seen.add(path)
-        if path.exists():
-            existing.append(path)
-    return existing
-
-
-def _confirm_cleanup(paths: list[Path], assume_yes: bool) -> bool:
-    if assume_yes:
-        return True
-    if not paths:
-        return False
-    print_warning("About to remove Devhost-managed proxy files:")
-    for path in paths:
-        console.print(f"  - {path}")
-    print_info("This does not modify your proxy config.")
-    print_info("Use 'devhost proxy detach' to remove managed include blocks.")
-    try:
-        response = input("Continue? [y/N]: ").strip().lower()
-        return response in {"y", "yes"}
-    except (EOFError, KeyboardInterrupt):
-        print_info("\nOperation cancelled by user")
-        return False
-
-
-def cmd_proxy_cleanup(
-    *,
-    include_system: bool = False,
-    include_external: bool = False,
-    include_lock: bool = False,
-    include_all: bool = False,
-    dry_run: bool = False,
-    assume_yes: bool = False,
-) -> None:
-    """Handle 'devhost proxy cleanup' command."""
-    state = StateConfig()
-
-    if include_all:
-        include_system = True
-        include_external = True
-        include_lock = True
-
-    if not (include_system or include_external or include_lock):
-        print_info("Usage: devhost proxy cleanup [--system] [--external] [--lock] [--all] [--dry-run] [--yes]")
-        return
-
-    targets = _cleanup_targets(
-        state,
-        include_system=include_system,
-        include_external=include_external,
-        include_lock=include_lock,
-    )
-
-    if not targets:
-        print_info("Nothing to clean.")
-        return
-
-    if dry_run:
-        print_info("Cleanup (dry-run) would remove:")
-        for path in targets:
-            console.print(f"  - {path}")
-        return
-
-    if not _confirm_cleanup(targets, assume_yes):
-        return
-
-    removed = 0
-    for path in targets:
-        try:
-            path.unlink(missing_ok=True)
-            state.remove_hash(path)
-            removed += 1
-        except OSError as exc:
-            print_warning(f"Failed to remove {path}: {exc}")
-
-    if removed:
-        print_success(f"Cleanup complete. Removed {removed} file(s).")
 
 
 def cmd_proxy_transfer(
