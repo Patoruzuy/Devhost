@@ -14,6 +14,10 @@ on:
       - 'router/requirements.txt'
       - '.github/workflows/security-scan.yml'
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   dependency-scan:
     name: Dependency vulnerability scan
@@ -132,8 +136,8 @@ jobs:
 
       - name: Generate SBOM (CycloneDX)
         run: |
-          cyclonedx-py environment --format json --output sbom-cyclonedx.json
-          cyclonedx-py environment --format xml --output sbom-cyclonedx.xml
+          cyclonedx-bom environment --output sbom-cyclonedx.json --format json
+          cyclonedx-bom environment --output sbom-cyclonedx.xml --format xml
 
       - name: Upload SBOM artifacts
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
