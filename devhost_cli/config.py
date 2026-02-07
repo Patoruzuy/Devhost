@@ -1,10 +1,14 @@
 """Configuration management for devhost.json, devhost.yml and domain settings"""
 
 import json
+import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from .utils import msg_error, msg_success, msg_warning
+
+logger = logging.getLogger("devhost.config")
 
 # Try to import yaml, but don't fail if not installed
 try:
@@ -139,17 +143,51 @@ class Config:
     """Manages devhost.json configuration"""
 
     def __init__(self):
-        # Check environment variable first
         env_path = os.getenv("DEVHOST_CONFIG")
         if env_path:
-            self.config_file = Path(env_path).resolve()
+            self.config_file = Path(env_path).expanduser().resolve()
             self.script_dir = self.config_file.parent
+            self.domain_file = self.script_dir / ".devhost" / "domain"
         else:
-            # Use parent directory of this module
-            self.script_dir = Path(__file__).parent.parent.resolve()
+            # Default to user-owned config so pip installs work without writing into site-packages.
+            self.script_dir = Path.home() / ".devhost"
             self.config_file = self.script_dir / "devhost.json"
+            self.domain_file = self.script_dir / "domain"
+            self._migrate_legacy_user_files()
 
-        self.domain_file = self.script_dir / ".devhost" / "domain"
+    def _migrate_legacy_user_files(self) -> None:
+        """
+        Best-effort migration from legacy repo/site-packages locations into ~/.devhost.
+
+        This avoids breaking upgrades where older versions wrote devhost.json or
+        .devhost/domain under the package directory.
+        """
+        try:
+            if self.config_file.exists() and self.domain_file.exists():
+                return
+        except OSError:
+            return
+
+        legacy_root = Path(__file__).parent.parent.resolve()
+        legacy_config = legacy_root / "devhost.json"
+        legacy_domain = legacy_root / ".devhost" / "domain"
+
+        try:
+            self.script_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+
+        try:
+            if (not self.config_file.exists()) and legacy_config.is_file():
+                self.config_file.write_text(legacy_config.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
+
+        try:
+            if (not self.domain_file.exists()) and legacy_domain.is_file():
+                self.domain_file.write_text(legacy_domain.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
 
     def load(self) -> dict:
         """Load configuration from file"""
@@ -187,7 +225,7 @@ class Config:
         if domain:
             return domain
 
-        # Check domain file
+        # Check legacy domain file first (supports per-workspace configs via DEVHOST_CONFIG)
         if self.domain_file.exists():
             try:
                 domain = self.domain_file.read_text().strip()
@@ -195,6 +233,16 @@ class Config:
                     return domain
             except OSError:
                 pass
+
+        # Prefer unified v3 state as fallback
+        try:
+            from .state import StateConfig
+
+            domain = StateConfig().system_domain
+            if domain:
+                return domain
+        except Exception:
+            pass
 
         return "localhost"
 
@@ -213,6 +261,15 @@ class Config:
             self.domain_file.parent.mkdir(parents=True, exist_ok=True)
             self.domain_file.write_text(domain)
             msg_success(f"Domain set to: {domain}")
+
+            # Keep v3 state in sync (mode/system/external tooling relies on it)
+            try:
+                from .state import StateConfig
+
+                state = StateConfig()
+                state.system_domain = domain
+            except Exception:
+                pass
 
             # Regenerate Caddyfile with new domain
             from .caddy import generate_caddyfile
@@ -233,3 +290,139 @@ class Config:
         except OSError as e:
             msg_error(f"Failed to set domain: {e}")
             return False
+
+
+def validate_config(
+    config_data: dict[str, Any] | None = None, config_file: Path | None = None
+) -> tuple[bool, list[str]]:
+    """
+    Validate devhost.json configuration for correctness and security.
+
+    Checks:
+    - Config file exists and is readable
+    - JSON structure is valid dict
+    - Route names are valid (alphanumeric + hyphens, max 63 chars)
+    - Target values are valid (port, host:port, or URL)
+    - No duplicate route names
+    - File permissions are reasonable (not world-writable)
+
+    Args:
+        config_data: Config dict to validate (or None to load from file)
+        config_file: Path to config file (or None to use default)
+
+    Returns:
+        (is_valid, errors): Tuple of validation status and list of error messages
+
+    Examples:
+        >>> validate_config({"api": 8000})
+        (True, [])
+
+        >>> validate_config({"invalid name!": 8000})
+        (False, ["Invalid route name: 'invalid name!'"])
+    """
+    errors: list[str] = []
+
+    # Load config if not provided
+    if config_data is None:
+        if config_file is None:
+            config_file = Config().config_file
+
+        # Check file exists
+        if not config_file.exists():
+            errors.append(f"Config file not found: {config_file}")
+            return (False, errors)
+
+        # Check file is readable
+        try:
+            with open(config_file) as f:
+                config_data = json.load(f)
+        except PermissionError:
+            errors.append(f"Config file not readable: {config_file}")
+            return (False, errors)
+        except json.JSONDecodeError as e:
+            errors.append(f"Invalid JSON in config file: {e}")
+            return (False, errors)
+        except OSError as e:
+            errors.append(f"Error reading config file: {e}")
+            return (False, errors)
+
+        # Check file permissions (Unix only)
+        if hasattr(os, "stat") and os.name != "nt":
+            try:
+                import stat
+
+                st = config_file.stat()
+                # Check if world-writable (security risk)
+                if st.st_mode & stat.S_IWOTH:
+                    errors.append(f"Config file is world-writable (security risk): {config_file}")
+            except OSError:
+                pass  # Permission check is optional
+
+    # Validate structure
+    if not isinstance(config_data, dict):
+        errors.append(f"Config must be a JSON object, got {type(config_data).__name__}")
+        return (False, errors)
+
+    # Validate each route
+    from .router.security import MAX_ROUTE_NAME_LENGTH
+    from .validation import parse_target
+
+    seen_names: set[str] = set()
+
+    for name, target in config_data.items():
+        # Validate route name
+        if not isinstance(name, str):
+            errors.append(f"Route name must be string, got {type(name).__name__}: {name}")
+            continue
+
+        # Check for duplicates (case-insensitive)
+        name_lower = name.lower()
+        if name_lower in seen_names:
+            errors.append(f"Duplicate route name (case-insensitive): '{name}'")
+        seen_names.add(name_lower)
+
+        # Validate name format
+        if not name:
+            errors.append("Route name cannot be empty")
+            continue
+
+        if not all(c.isalnum() or c == "-" for c in name):
+            errors.append(f"Invalid route name '{name}': must contain only letters, numbers, and hyphens")
+            continue
+
+        if len(name) > MAX_ROUTE_NAME_LENGTH:
+            errors.append(f"Route name '{name}' too long: {len(name)} chars (max {MAX_ROUTE_NAME_LENGTH})")
+            continue
+
+        # Validate target value
+        if not isinstance(target, (int, str)):
+            errors.append(f"Invalid target for '{name}': must be int or string, got {type(target).__name__}")
+            continue
+
+        # Parse and validate target
+        target_str = str(target)
+        parsed = parse_target(target_str)
+        if parsed is None:
+            errors.append(f"Invalid target for '{name}': {target_str}")
+            continue
+
+        scheme, host, port = parsed
+
+        # Validate port range
+        if not (1 <= port <= 65535):
+            errors.append(f"Invalid port for '{name}': {port} (must be 1-65535)")
+            continue
+
+        # Validate scheme
+        if scheme not in {"http", "https"}:
+            errors.append(f"Invalid scheme for '{name}': {scheme} (only http/https allowed)")
+            continue
+
+    # Return validation result
+    is_valid = len(errors) == 0
+    if is_valid:
+        logger.debug("Config validation passed: %d routes", len(config_data))
+    else:
+        logger.warning("Config validation failed with %d errors", len(errors))
+
+    return (is_valid, errors)

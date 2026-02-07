@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 from .config import Config, ProjectConfig
+from .state import StateConfig
 from .utils import msg_error, msg_info, msg_success, msg_warning
 
 
@@ -57,7 +58,7 @@ class DevhostRunner:
         name: str | None = None,
         port: int | None = None,
         domain: str | None = None,
-        host: str = "0.0.0.0",
+        host: str = "127.0.0.1",
         auto_register: bool = True,
         auto_caddy: bool = True,
         **kwargs,
@@ -180,7 +181,12 @@ class DevhostRunner:
         self.registered_name = resolved_name
         self.registered_port = self.port
 
-        msg_success(f"Registered: {resolved_name}.{self.domain} → 127.0.0.1:{self.port}")
+        msg_success(f"Registered: {resolved_name}.{self.domain} -> 127.0.0.1:{self.port}")
+        try:
+            upstream = f"{self.host}:{self.port}"
+            StateConfig().set_route(resolved_name, upstream=upstream, domain=self.domain, enabled=True)
+        except Exception:
+            pass
 
     def unregister(self):
         """Remove route from global devhost.json on exit"""
@@ -196,6 +202,10 @@ class DevhostRunner:
                     del routes[self.registered_name]
                     self.global_config.save(routes)
                     msg_info(f"Unregistered: {self.registered_name}")
+                    try:
+                        StateConfig().remove_route(self.registered_name)
+                    except Exception:
+                        pass
         except Exception:
             pass  # Best effort cleanup
 
@@ -203,6 +213,11 @@ class DevhostRunner:
         """Check and optionally start Caddy for port 80 access"""
         if not self.auto_caddy:
             return
+        try:
+            if StateConfig().proxy_mode != "system":
+                return
+        except Exception:
+            pass
 
         # Check if Caddy is needed (port 80 access)
         if not is_port_in_use(80):
@@ -225,7 +240,21 @@ class DevhostRunner:
     def _print_startup_info(self):
         """Print startup information"""
         name = self.registered_name or self.name
-        url = f"http://{name}.{self.domain}"
+        mode = "gateway"
+        gateway_port = 7777
+        try:
+            state = StateConfig()
+            mode = state.proxy_mode
+            gateway_port = state.gateway_port
+        except Exception:
+            pass
+
+        if mode == "gateway":
+            url = f"http://{name}.{self.domain}:{gateway_port}"
+        elif mode in ("system", "external"):
+            url = f"http://{name}.{self.domain}"
+        else:
+            url = f"http://{self.host}:{self.port}"
 
         print()
         print(f"🚀 Starting {name}...")
@@ -233,13 +262,28 @@ class DevhostRunner:
         print(f"   Port: {self.port}")
         print()
 
-        if is_port_in_use(80):
-            # Caddy likely not running on 80, need port in URL
-            print(f"🌐 Access at: {url}:{self.port}")
-        else:
-            print(f"🌐 Access at: {url}")
+        print(f"🌐 Access at: {url}")
 
         print()
+
+    def _ensure_gateway_router(self):
+        """Start the gateway router when running in gateway mode."""
+        try:
+            state = StateConfig()
+            if state.proxy_mode != "gateway":
+                return
+        except Exception:
+            return
+
+        try:
+            from .router_manager import Router
+
+            router = Router()
+            if not router.is_running()[0]:
+                msg_info("Starting Devhost gateway router...")
+                router.start()
+        except Exception:
+            pass
 
     def _run_flask(self):
         """Run Flask application"""
@@ -322,6 +366,9 @@ class DevhostRunner:
         # Register route
         self.register()
 
+        # Ensure proxy is running (gateway mode)
+        self._ensure_gateway_router()
+
         # Check/start Caddy
         self._check_caddy()
 
@@ -349,7 +396,7 @@ def run(
     name: str | None = None,
     port: int | None = None,
     domain: str | None = None,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     auto_register: bool = True,
     auto_caddy: bool = True,
     **kwargs,
@@ -362,7 +409,7 @@ def run(
         name: App name (becomes subdomain). Auto-detected from devhost.yml or directory
         port: Port to run on. Auto-detected if not specified
         domain: Base domain (default: localhost)
-        host: Host to bind to (default: 0.0.0.0)
+        host: Host to bind to (default: 127.0.0.1 for security)
         auto_register: Register route in devhost.json (default: True)
         auto_caddy: Prompt to start Caddy for port 80 (default: True)
         **kwargs: Additional arguments passed to the framework's run method

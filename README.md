@@ -1,5 +1,3 @@
-
-
 # 🌐 Devhost
 
 ![CI](https://github.com/Patoruzuy/Devhost/actions/workflows/ci.yml/badge.svg)
@@ -7,64 +5,275 @@
 ![PyPI](https://img.shields.io/pypi/v/devhost)
 ![Python](https://img.shields.io/pypi/pyversions/devhost)
 
-**Secure, flexible local domain routing for developers.**
-
-Devhost allows you to map subdomains of a base domain (default: `localhost`, e.g. `myapp.localhost`) to local app ports, with optional HTTPS and wildcard routing via Caddy and a Python backend.
-
-## Installation
-
-### PyPI Package (Recommended)
+**Stop memorizing ports. Start using real domains.**
 
 ```bash
+# Before: The Port Juggling Hell 😫
+http://localhost:3000   # Which app is this again?
+http://localhost:8080   # Frontend or backend?
+http://localhost:5173   # Wait, did I change the port?
+
+# After: Devhost Makes It Obvious 🎯
+
+# Gateway Mode (works instantly, no setup)
+http://web.localhost:7777
+http://api.localhost:7777
+http://admin.localhost:7777
+
+# System/External Mode (production-like URLs)
+http://web.localhost
+http://api.localhost
+http://admin.localhost
+```
+
+**What is Devhost?** A local development router that gives every project its own subdomain. One command, zero config, works instantly on any OS.
+
+## Why You Need This
+
+**The Problem:** Working on modern apps means running 5+ services. You're constantly:
+- 🤯 Forgetting which port runs what (`Was it 3000 or 3001?`)
+- 🔒 Breaking OAuth redirects when you restart your server on a different port
+- 🍪 Fighting cookie/CORS issues because everything's on `localhost`
+- 📱 Struggling to test on your phone (`http://192.168.1.whatever:8080`?)
+- 🔗 Sharing broken links with your team (`localhost` only works for you)
+
+**The Solution:** Devhost routes all your apps through meaningful subdomains on a single port. No admin rights needed, works in 60 seconds.
+
+## 🚀 Get Started in 60 Seconds
+
+```bash
+# 1. Install (one command)
+pip install "devhost[tui]"
+
+# 2. Start routing
+devhost start
+
+# 3. Register your app
+devhost add web 3000
+
+# 4. Open in browser
+devhost open web
+# → Opens http://web.localhost:7777
+```
+
+**That's it.** Your React/Vue/Next.js app now has a real subdomain. Add more apps the same way.
+
+---
+
+## ✨ What Makes Devhost Different
+
+### 🎯 **Works Immediately** (Gateway Mode - Default)
+- No admin rights required
+- No Docker, no containers, no VMs
+- Pure Python, runs anywhere
+- One port (`:7777`) routes everything
+
+### 🔒 **Production-Ready Features**
+- **WebSocket Support**: Hot reload, Socket.IO, real-time apps work out of the box
+- **HTTPS/TLS**: Full certificate management (optional System Mode)
+- **Security Hardened**: SSRF protection, input validation, secure defaults
+- **Tunnel Integration**: Expose to internet with cloudflared/ngrok (one command)
+
+### 🛠️ **Developer Experience**
+- **Interactive Dashboard**: Feature-rich TUI with keyboard shortcuts, draft mode, and contextual help (`devhost dashboard`)
+  - Press `F1` for complete keyboard reference
+  - Visual progress bars and status indicators
+  - Safety confirmations and error boundaries
+  - Accessible design (screen reader friendly)
+- **OAuth Testing**: Stable redirect URLs that don't break when you restart
+- **Mobile Testing**: Access from your phone (`http://api.localhost:7777`)
+- **Framework Integration**: Drop-in support for Flask, FastAPI, Django
+- **Team Sharing**: Export routes as nginx/Caddy configs (External Mode)
+
+### 🚀 **Three Modes, One Tool**
+
+```
+┌─────────────────────────────────────────────────┐
+│  Gateway Mode (Default)                         │
+│  ✓ Works instantly, no setup                    │
+│  ✓ Port 7777 routes all apps                    │
+│  ✓ http://app.localhost:7777                    │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│  System Mode (Optional)                         │
+│  ✓ Portless URLs (ports 80/443)                 │
+│  ✓ Managed Caddy with auto-certs                │
+│  ✓ http://app.localhost (production-like)       │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│  External Mode (Advanced)                       │
+│  ✓ Integrate with existing nginx/Traefik        │
+│  ✓ Generate config snippets                     │
+│  ✓ Team consistency without lock-in             │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## 🎬 Real-World Use Cases
+
+### 🏗️ Microservices Development
+```bash
+devhost add frontend 3000
+devhost add api 8000
+devhost add auth 4000
+devhost add db-admin 5432
+
+# Access everything with meaningful names
+http://frontend.localhost:7777
+http://api.localhost:7777
+http://auth.localhost:7777
+http://db-admin.localhost:7777
+```
+
+### 🔐 OAuth/OIDC Testing
+```bash
+# Your OAuth redirect URL stays stable
+# (No more "redirect_uri mismatch" errors when you restart!)
+
+Redirect URI: http://auth.localhost:7777/callback
+→ Works every time, even after restarts
+```
+
+### 📱 Mobile App Development
+```bash
+devhost tunnel start api
+# → Exposes http://api.localhost:7777 as https://random-url.trycloudflare.com
+# → Test your mobile app against your local backend
+```
+
+### 👥 Team Development
+```bash
+# Export your setup for the team
+devhost proxy export --driver nginx > team-nginx.conf
+
+# Everyone uses the same subdomain structure
+# → No more "works on my machine" URL issues
+```
+
+---
+
+## 📖 Documentation
+
+- **[Why Devhost?](https://github.com/Patoruzuy/Devhost/blob/main/docs/why.md)** — Detailed benefits and comparisons
+- **[Installation](https://github.com/Patoruzuy/Devhost/blob/main/docs/installation.md)** — OS-specific setup guides  
+- **[Getting Started](https://github.com/Patoruzuy/Devhost/blob/main/docs/getting-started.md)** — Comprehensive tutorial
+- **[Proxy Modes](https://github.com/Patoruzuy/Devhost/blob/main/docs/modes.md)** — Gateway vs System vs External
+- **[CLI Reference](https://github.com/Patoruzuy/Devhost/blob/main/docs/cli.md)** — All commands and options
+- **[Security Guide](https://github.com/Patoruzuy/Devhost/blob/main/docs/security-configuration.md)** — Security features and best practices
+- **[Performance Tuning](https://github.com/Patoruzuy/Devhost/blob/main/docs/performance.md)** — Optimization and monitoring
+- **[Architecture](https://github.com/Patoruzuy/Devhost/blob/main/docs/architecture.md)** — How it works internally
+
+---
+
+## 🔒 Built for Safety
+
+Devhost is designed for **local development only** with security baked in:
+
+- ✅ **Localhost-only binding** — Never exposed to your network by default
+- ✅ **SSRF protection** — Blocks cloud metadata endpoints and private networks  
+- ✅ **Input validation** — All routes and hostnames validated before use
+- ✅ **No privilege required** — Gateway mode runs as a regular user
+- ✅ **Audit logging** — Track all configuration changes
+
+Need to proxy to your LAN? Set `DEVHOST_ALLOW_PRIVATE_NETWORKS=1` explicitly.
+
+📖 **Full security documentation**: [Security Guide](https://github.com/Patoruzuy/Devhost/blob/main/docs/security-configuration.md)
+
+---
+
+### What Devhost Does
+
+**Gateway Mode** (Default):
+- ✅ Routes all your local apps through a single port (7777)
+- ✅ Provides memorable subdomain URLs without admin permissions
+- ✅ Proxies HTTP and WebSocket traffic bidirectionally
+- ✅ Works immediately on all platforms (Windows, macOS, Linux)
+
+**System Mode** (Optional):
+- ✅ Manages Caddy lifecycle for portless URLs (80/443)
+- ✅ Generates Caddyfile from your routes automatically
+- ✅ Requires one-time admin setup, then runs seamlessly
+
+**External Mode** (Advanced):
+- ✅ Generates config snippets for your existing proxy (nginx/Traefik)
+- ✅ Detects config drift and offers emergency reset
+- ✅ Integrates with your infrastructure, doesn't replace it
+
+### What Devhost Does NOT Do
+
+- ❌ **Never surprise-edits user files**: Any edit to user-owned files (like existing Caddyfiles) must be explicit, backed up, and reversible
+- ❌ **No automatic LAN exposure**: Defaults to loopback (127.0.0.1) to prevent accidental network exposure
+- ❌ **No hidden state**: All configuration is in `~/.devhost/state.yml` and `~/.devhost/devhost.json` — no mysterious database
+- ❌ **No app process management**: Devhost routes traffic; it doesn’t own your app lifecycle (use your normal `npm run dev`, `uvicorn`, etc., or the optional `devhost_cli.runner.run()` helper)
+- ❌ **No production deployment**: Strictly for local development — never use in production environments
+
+### Clear Ownership Boundaries
+
+- **Devhost owns**: Router process, Caddy (in System mode), `~/.devhost/state.yml`, `~/.devhost/devhost.json`, generated snippets
+- **You own**: Your apps, existing proxy configs, system DNS settings, hosts file entries
+- **Opt-in only**: Features like tunnel exposure, TUI dashboard, and External mode require explicit commands
+
+### One Mental Model Per Mode
+
+- **Gateway**: "Single port for everything, works immediately"
+- **System**: "Portless URLs with managed Caddy"
+- **External**: "Generate snippets for my existing setup"
+
+No ambiguity. Each mode has a clear, concrete outcome.
+
+---
+
+## 🔒 Security
+
+Devhost is built for **local development only** with security hardened by default: SSRF protection, input validation, localhost-only binding, and no privilege escalation.
+
+📖 **Full security details**: [Security Guide](https://github.com/Patoruzuy/Devhost/blob/main/docs/security-configuration.md)
+
+## 🚀 Quick Start
+
+### Installation
+
+```bash
+# Core installation
 pip install devhost
+
+# With optional dependencies
+pip install devhost[flask]      # Flask integration helpers
+pip install devhost[fastapi]    # FastAPI integration helpers
+pip install devhost[django]     # Django integration
+pip install devhost[tui]        # Interactive dashboard (optional, uninstall anytime)
+pip install devhost[qr]         # QR code generation
+pip install devhost[dev]        # Tests + linting (contributors)
+
+# Install everything
+pip install devhost[all]
 ```
 
-After installation, use the `devhost` CLI directly:
+> **Note**: The TUI dashboard is completely optional. Install with `pip install devhost[tui]` when you need it, uninstall with `pip uninstall textual psutil` when you don't. The CLI works independently.
+
+### Add Your First Route
 
 ```bash
-devhost add hello 3000
+# Start the Gateway router (Mode 1)
+devhost start
+
+# Add a route
+devhost add api 8000
+
+# List routes
 devhost list
-devhost open hello
+
+# Open in browser
+devhost open api
+# → Opens http://api.localhost:7777
 ```
 
-### Git Clone (Development)
-
-For development or customization:
-
-```bash
-git clone https://github.com/Patoruzuy/devhost.git
-cd devhost
-python install.py --linux  # or --macos, --windows
-```
-
-## Features
-
-- **CLI Tool**: Map subdomains to ports (e.g., `app.localhost` → `localhost:1234`)
-- **Zero-Config Runner**: One line to run your app with subdomain support (v2.3+)
-- **Project Config**: `devhost.yml` per-project configuration
-- **Custom Base Domain**: Change from `localhost` to anything (e.g., `app.flask`, `api.devhost`)
-- **ASGI Middleware**: Embed subdomain routing in FastAPI/Starlette apps
-- **WSGI Middleware**: Flask and Django support (v2.2+)
-- **Remote Network Devices**: Map to any IP on your network (e.g., `rpi.localhost` → `192.168.1.100:8080`)
-- **HTTPS Support**: Via Caddy's internal CA (use `--https`)
-- **Cross-Platform**: Works on macOS, Linux, and Windows
-- **Hot Reload**: Changes take effect immediately without restart
-- **Auto-Registration**: Apps register themselves on startup, cleanup on exit
-
-## Use Cases
-
-### 1. Zero-Config Runner (Recommended - v2.3+)
-
-The simplest way to run your app with subdomain support:
-
-```bash
-# Create project config
-devhost init
-# → Creates devhost.yml with your app name
-```
+### Framework Integration
 
 ```python
-# In your app
 from flask import Flask
 from devhost_cli.runner import run
 
@@ -75,532 +284,246 @@ def index():
     return "Hello!"
 
 if __name__ == '__main__':
-    run(app)  # That's it! Accessible at http://myapp.localhost
+    run(app, name="myapp")
+    # → Accessible at http://myapp.localhost:7777
+    # (Auto-registers the route and starts the Gateway router if needed)
 ```
 
-Output:
+## 🎯 Modes
+
+Devhost operates in three modes, each offering different trade-offs:
+
 ```
-🚀 Starting myapp...
-✓ Registered: myapp.localhost → 127.0.0.1:8000
-🌐 Access at: http://myapp.localhost:8000
+┌─────────────────────────────────────────────────────────────┐
+│                      DEVHOST MODES                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Mode 1: Gateway (Default) — No admin required              │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ Browser → Router:7777 → App:8000                    │   │
+│  │ URL: http://myapp.localhost:7777                    │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  Mode 2: System — Portless URLs (admin required once)       │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ Browser → Caddy:80 → App:8000                       │   │
+│  │ URL: http://myapp.localhost                         │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  Mode 3: External — Your existing proxy                     │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ Browser → nginx/Traefik → App:8000                  │   │
+│  │ URL: http://myapp.localhost                         │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**Framework-specific wrappers:**
+### Mode 1: Gateway (Default)
 
-```python
-# Flask
-from devhost_cli.frameworks.flask import run_flask
-run_flask(app)
-
-# Flask with SocketIO
-from devhost_cli.frameworks.flask import run_flask
-run_flask(app, socketio=socketio)
-
-# FastAPI
-from devhost_cli.frameworks.fastapi import run_fastapi
-run_fastapi(app)
-
-# Django
-from devhost_cli.frameworks.django import run_django
-run_django()
-```
-
-### 2. CLI Tool (Traditional Usage)
-
-Manage local development domains from the command line:
+Works immediately, no admin permissions needed:
 
 ```bash
-devhost add api 8000
-devhost add frontend 3000
-devhost list
+devhost add frontend 3000    # http://frontend.localhost:7777
+devhost add api 8000         # http://api.localhost:7777
+devhost add admin 4200       # http://admin.localhost:7777
 ```
 
-### 3. ASGI Middleware (v2.1+)
+**Key Benefits** (why use a gateway?):
 
-Embed Devhost routing directly in your FastAPI/Starlette application:
+1. **Microservices Made Easy** — Remembering 10+ ports is cognitive overhead. Use `api.localhost`, `auth.localhost`, `payments.localhost` — single port (7777), semantic names.
 
-```python
-from fastapi import FastAPI
-from devhost_cli.middleware.asgi import DevhostMiddleware
+2. **OAuth/OIDC That Just Works** — OAuth providers need exact URLs. `http://auth.localhost:7777/callback` never changes, even when your app port does.
 
-app = FastAPI()
-app.add_middleware(DevhostMiddleware)
+3. **Cookie Domain Isolation** — Cookies on `localhost:3000` leak to `localhost:8080`, causing weird auth bugs. `web.localhost` and `api.localhost` are separate domains.
 
-@app.get("/")
-async def read_root():
-    return {"message": "Hello from FastAPI with Devhost routing!"}
-```
+4. **Real CORS Testing** — CORS doesn't trigger on same `localhost:PORT`. Different subdomains = catch CORS issues before production.
 
-### 3. WSGI Middleware (v2.2+)
+**[See all 10 benefits →](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-1-gateway-default)**
 
-Embed Devhost routing in your Flask or Django application:
+### Mode 2: System Proxy
 
-**Flask:**
-```python
-from flask import Flask
-from devhost_cli.middleware.wsgi import DevhostWSGIMiddleware
-
-app = Flask(__name__)
-app.wsgi_app = DevhostWSGIMiddleware(app.wsgi_app)
-
-@app.route("/")
-def index():
-    return {"message": "Hello from Flask with Devhost routing!"}
-```
-
-**Django:**
-```python
-# In your wsgi.py file
-from devhost_cli.middleware.wsgi import DevhostWSGIMiddleware
-from django.core.wsgi import get_wsgi_application
-
-application = get_wsgi_application()
-application = DevhostWSGIMiddleware(application)
-```
-
-### 4. Factory Function (ASGI)
-
-Quick ASGI app setup with built-in routing:
-
-Create a complete Devhost-enabled app with one function:
-
-```python
-from devhost_cli.factory import create_devhost_app
-
-# Creates FastAPI app with subdomain routing + proxy endpoints
-app = create_devhost_app()
-```
-
-**More examples:** [View all integration patterns on GitHub →](https://github.com/Patoruzuy/Devhost/tree/main/examples)
-
-## Custom Base Domains
-
-**By default, Devhost uses `.localhost`** (e.g., `app.localhost`, `api.localhost`), but you can change it to **any domain you want**.
-
-### Change the base domain:
+For portless URLs (requires one-time admin setup):
 
 ```bash
-devhost domain flask
+devhost proxy upgrade --to system
+# Now: http://myapp.localhost (no port!)
 ```
 
-Now all your routes use `.flask` instead:
+**Key Benefits** (production parity):
+
+1. **Production URL Matching** — Production uses `app.example.com`, dev uses `localhost:3000`? Use `app.localhost` to mirror production URL structure and catch bugs early.
+
+2. **IoT & Home Lab Access** — Raspberry Pi at `192.168.1.50:8080`, NAS at `192.168.1.100:5000`? Use `http://homelab.raspberry` or `http://nas.home` — forget IPs and ports across your local network. (Use any domain you want, not just `.localhost`!)
+
+3. **Third-Party Integrations** — Payment/auth providers whitelist domains without ports. `payments.localhost` (no port) matches their requirements for realistic local testing.
+
+4. **Professional Demos** — Showing `:7777` in URLs looks unprofessional. Clean portless URLs look production-ready for client presentations.
+
+**[See all 11 benefits →](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-2-system-portless-urls)**
+
+### Mode 3: External Proxy
+
+Generate snippets for your existing proxy:
 
 ```bash
-devhost add app 3000     # Creates app.flask → localhost:3000
-devhost add api 8000     # Creates api.flask → localhost:8000
-devhost add rpi 192.168.1.100:8080  # Creates rpi.flask → 192.168.1.100:8080
+devhost proxy export --driver caddy   # Generate Caddy snippet
+devhost proxy export --driver nginx   # Generate nginx config
+devhost proxy attach caddy    # Attach to existing Caddyfile
 ```
 
-Visit `app.flask`, `api.flask`, or `rpi.flask` in your browser!
+**Key Benefits** (brownfield integration):
 
-### Why use custom domains?
+1. **Incremental Adoption** — Already have nginx/Traefik managing 50+ routes? Generate snippets, don't replace your entire setup. Zero migration risk.
 
-- **Project-specific namespaces**: Use `myproject` domain for all related services
-- **Better organization**: Separate domains for different projects (`frontend.prod`, `api.staging`)
-- **Avoid conflicts**: If another tool uses `.localhost`, switch to `.dev` or `.local`
-- **Memorable names**: `blog.gatsby` is easier to remember than `blog.localhost`
+2. **Configuration Drift Detection** — Manual edits break Devhost-generated routes? Integrity checking warns when snippets diverge, so you know exactly when manual changes conflict.
 
-### Setup requirements:
+3. **Zero Trust Required** — Worried Devhost will break your proxy? Export-only mode never touches your files. Review generated config before applying.
 
-After changing the domain, re-run the installer to update DNS/resolver configuration:
+4. **Emergency Escape Hatch** — Devhost breaks, need to revert immediately? Detach removes only marked sections, preserves the rest. Safe experimentation with quick rollback.
+
+**[See all 10 benefits →](https://github.com/Patoruzuy/Devhost/blob/main/BENEFITS.md#mode-3-external-infrastructure-integration)**
+
+## 📋 Core Commands
 
 ```bash
-devhost domain myproject
-python install.py --linux --domain myproject  # or --macos, --windows
+# Essential commands
+devhost start                      # Start router
+devhost add <name> <port>           # Add route
+devhost list                        # Show all routes
+devhost open <name>                 # Open in browser
+
+# Mode upgrades
+devhost proxy upgrade --to system   # Portless URLs
+devhost proxy export --driver nginx # Generate config
+
+# Advanced features
+devhost tunnel start [name]         # Expose to internet
+devhost dashboard                   # Visual TUI
 ```
 
-**All routes automatically use your custom domain** - both localhost ports AND remote network devices!
+📖 **Full CLI reference**: [docs/cli.md](https://github.com/Patoruzuy/Devhost/blob/main/docs/cli.md)
 
-## Project Configuration (devhost.yml)
+## ⚙️ Configuration
 
-Create a `devhost.yml` in your project root for per-project settings:
+Devhost stores routes in `~/.devhost/devhost.json` and state in `~/.devhost/state.yml`.
 
-```bash
-devhost init
-```
+**Quick tips:**
+- Use `DEVHOST_CONFIG` to point to a project-local config file
+- Use `DEVHOST_DOMAIN=home` for custom domains (`http://api.home:7777`)
+- Use `DEVHOST_LOG_LEVEL=DEBUG` for troubleshooting
 
-Or create manually:
+📖 **Full configuration guide**: [docs/configuration.md](https://github.com/Patoruzuy/Devhost/blob/main/docs/configuration.md)
 
-```yaml
-# devhost.yml
-name: myapp           # App name (becomes subdomain)
-port: 8000           # Port to run on (omit for auto-detect)
-domain: localhost    # Base domain
-auto_register: true  # Register route on startup
-auto_caddy: true     # Prompt to start Caddy for port 80
-```
-
-The runner reads this config automatically:
-
-```python
-from devhost_cli.runner import run
-run(app)  # Uses settings from devhost.yml
-```
-
-## Benefits for Devs
-
-- No need to remember localhost:PORT combos
-- Clean and memorable dev URLs
-- HTTP by default; HTTPS available with `--https`
-- Works with any language/framework running locally
-- **Zero-config**: Just run your app, it registers itself
-
-## Quickstart
-
-**Install via pip:**
-
-```bash
-pip install devhost
-```
-
-**Add your first route:**
-
-```bash
-devhost add hello 3000
-devhost list
-devhost open hello
-```
-
-Visit `hello.localhost` in your browser.
-
-### From Source (Development)
-
-```bash
-git clone https://github.com/Patoruzuy/devhost.git
-cd devhost
-python install.py --linux
-devhost add hello 3000
-devhost list
-devhost remove hello
-```
-
-Note: the `devhost` CLI is implemented in Python (cross-platform).
-
-### Installation Options
-
-The installer supports various flags to customize the setup process:
-
-| Flag | Description | Platforms |
-|------|-------------|-----------|
-| `--yes` | Accept all prompts automatically (non-interactive mode) | All |
-| `--dry-run` | Show what would be done without making any changes | All |
-| `--domain <name>` | Set custom base domain (default: localhost) | All |
-| `--start-dns` | Automatically start DNS service (dnsmasq) | macOS, Linux |
-| `--install-completions` | Install shell completions for bash/zsh | macOS, Linux |
-| `--caddy` | Install and configure Caddy web server | Windows |
-| `--clean` | Remove existing installation before reinstalling | Windows |
-
-Cross-platform installer (uses the Python CLI):
-
-```bash
-python install.py --linux
-```
-
-macOS example:
-
-```bash
-python install.py --macos --yes --start-dns --install-completions
-```
-
-Windows example (PowerShell):
-
-```powershell
-python .\install.py --windows --caddy
-```
-
-To change the base domain (for example, `hello.flask`), set it once and re-run your installer to update DNS/resolvers:
-
-```bash
-devhost domain flask
-python install.py --domain flask
-```
-
-Run the router locally (development):
-
-```bash
-cd router
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app:app --host 127.0.0.1 --port 5555 --reload
-```
-
-Run the router in Docker (quick):
+## 🐳 Docker
 
 ```bash
 docker compose up --build -d
-# then open http://127.0.0.1:5555 with Host header set to <name>.localhost
 ```
 
-`docker-compose.yml` mounts the repo `devhost.json` into the container so edits take effect immediately.
-
-Notes & safety
-
-- `install.py` handles Linux/macOS/Windows and will prompt you about DNS changes. Review DNS/resolver changes before applying them on systems using `systemd-resolved`.
-- We now generate the project `caddy/Caddyfile`, the user `~/.config/caddy/Caddyfile`, and (if present) `/etc/caddy/Caddyfile` to keep system Caddy installs in sync.
-- The router loads `devhost.json` per request so CLI changes take effect immediately without restarting the router.
-
-Quick Commands
-
-- `devhost add <name> <port|host:port>` — add a mapping (e.g. `devhost add hello 3000`).
-- `devhost add <name> <ip:port>` — add remote IP mapping (e.g. `devhost add rpi 192.168.1.100:8080`).
-- `devhost add <name> --http <port|host:port>` — force HTTP when opening the dev URL.
-- `devhost add <name> --https <port|host:port>` — force HTTPS when opening the dev URL.
-- `devhost remove <name>` — remove a mapping.
-- `devhost list` — show active mappings.
-- `devhost list --json` — show mappings as JSON.
-- `devhost url <name>` — print the URL and press Ctrl+O to open it in the browser.
-- `devhost open <name>` — open the URL in the default browser.
-- `devhost validate` — quick health checks (config JSON, router health, DNS).
-- `devhost export caddy` — print the generated Caddyfile to stdout.
-- `devhost edit` — open `devhost.json` in `$EDITOR` (fallback: `nano`/`vi`).
-- `devhost resolve <name>` — show DNS resolution and port reachability for a mapping.
-- `devhost doctor` — deeper diagnostics (dnsmasq/systemd-resolved/Caddy).
-- `devhost doctor --windows` — Windows-specific diagnostics (Caddy, port 80, hosts).
-- `devhost doctor --windows --fix` — attempt Windows fixes (hosts sync + free port 80 + start Caddy).
-- `devhost info` — show all commands and usage.
-- `devhost status --json` — print router status as JSON (running, pid, health).
-- `devhost domain [name]` — show or set the base domain (default: `localhost`).
-- `devhost hosts sync` — re-apply hosts entries for all mappings on Windows (admin).
-- `devhost hosts clear` — remove all devhost entries from the Windows hosts file (admin).
-- `devhost caddy start|stop|restart|status` — manage Caddy on Windows.
-- `devhost fix-http` — convert all `https://` mappings to `http://` and regenerate Caddyfile.
-
-## Remote IP Support
-
-Devhost supports mapping subdomains to devices on your local network, not just localhost ports. **Remote devices use the same base domain** as your localhost routes.
-
-Perfect for:
-- Raspberry Pi projects
-- IoT devices  
-- Other computers on your network
-- Docker containers with bridge networking
-
-### Examples
-
-**With default `.localhost` domain:**
-
-**Raspberry Pi running a web server**:
-```bash
-devhost add rpi 192.168.1.100:8080
-# Access at http://rpi.localhost
-```
-
-**Network attached storage (NAS)**:
-```bash
-devhost add nas 192.168.1.50:5000
-devhost open nas  # Opens http://nas.localhost
-```
-
-**With custom `.devhost` domain:**
+The router runs on port 7777. Test with:
 
 ```bash
-# First, change the base domain
-devhost domain devhost
-
-# Then add remote devices
-devhost add rpi 192.168.1.100:8080    # Access at rpi.devhost
-devhost add nas 192.168.1.50:5000     # Access at nas.devhost
-devhost add router 192.168.1.1:80     # Access at router.devhost
+curl -H "Host: hello.localhost" http://127.0.0.1:7777/
 ```
 
-**Mix localhost and remote IPs** (all use same domain):
+## 🔌 WebSocket Support
+
+Devhost automatically proxies WebSocket connections. Perfect for:
+
+- React/Vite hot module reload
+- Socket.IO applications
+- Real-time dashboards
+- Live collaboration tools
+
+No configuration needed — WebSocket upgrade requests are detected and forwarded automatically.
+
+## 🌍 Tunnel Integration
+
+Expose your local apps to the internet:
 
 ```bash
-devhost domain myproject
-devhost add frontend 3000                    # frontend.myproject → localhost:3000
-devhost add api 8000                         # api.myproject → localhost:8000  
-devhost add rpi 192.168.1.100:8080          # rpi.myproject → 192.168.1.100:8080
-devhost add staging 10.0.0.25:3000          # staging.myproject → 10.0.0.25:3000
+# Auto-detect available provider
+devhost tunnel start api
+
+# Use specific provider
+devhost tunnel start api --provider ngrok
+devhost tunnel start api --provider cloudflared
+devhost tunnel start api --provider localtunnel
+
+# Check active tunnels
+devhost tunnel status
 ```
 
-### Configuration Format
+Supported providers:
+- **cloudflared** — Cloudflare Tunnel (free, no signup needed)
+- **ngrok** — Popular tunneling service
+- **localtunnel** — npm-based alternative
 
-Remote IPs can be added in several formats:
-- `192.168.1.100:8080` - Full IP with port
-- `10.0.0.25:3000` - Any valid IPv4 address
-- Combined with other targets in `devhost.json`:
+> Tunnel providers are external CLIs. Install at least one (`cloudflared`, `ngrok`, or `lt`) and Devhost will use it.
 
-```json
-{
-  "hello": 3000,
-  "api": 8000,
-  "rpi": "192.168.1.100:8080",
-  "nas": "192.168.1.50:5000"
-}
-```
+## 🖥️ TUI Dashboard (Optional)
 
-### Notes
+**The dashboard is completely optional** — install only when you need a visual interface. The CLI works independently.
 
-- The remote device must be reachable from your machine
-- Ensure firewalls allow traffic to the target port
-- IP addresses are validated when adding routes
-- Use `devhost resolve <name>` to test connectivity
-
-Configuration
-
-The project uses a `devhost.json` file (project root) with a simple mapping of names to ports. Example:
-
-```json
-{
-	"hello": 3000,
-	"api": 8000
-}
-```
-
-This file is created/updated by the CLI and is meant to be local (it’s gitignored). The router reads `DEVHOST_CONFIG` if set; otherwise it looks for the project root `devhost.json` (even when run from `router/`). The base domain comes from `DEVHOST_DOMAIN` or `.devhost/domain` (default: `localhost`).
-
-Router endpoints
-
-- `GET /health` — liveness + route count + uptime.
-- `GET /metrics` — basic request metrics (totals, per-status, per-subdomain).
-- `GET /routes` — current routes with parsed targets.
-- `GET /mappings` — current routes with basic TCP health checks.
-
-Logging
-
-- `DEVHOST_LOG_LEVEL` controls router log verbosity (default: `INFO`).
-- `DEVHOST_LOG_FILE` writes logs to a file in addition to stdout.
-- `DEVHOST_LOG_REQUESTS=1` enables per-request logging.
-
-Quick test (curl)
-
-Run the router (locally or via Docker) and test with `curl` by setting the `Host` header:
+Launch the interactive terminal dashboard:
 
 ```bash
-curl -H "Host: hello.localhost" http://127.0.0.1:5555/
+# Install (only when needed)
+pip install devhost[tui]
+
+# Run
+devhost dashboard
+
+# Uninstall (anytime)
+pip uninstall textual psutil
 ```
 
-Regenerating Caddyfile
+Features:
+- Live route status with health indicators
+- Add/remove routes interactively
+- Ghost port detection (find running dev servers)
+- Integrity drift detection
+- Visual flow diagrams
+- Log tailing
+- Emergency reset (safety boundaries enforced)
+- Profile switching for multi-context workflows
 
-The `devhost` CLI writes both the project `caddy/Caddyfile` (generated, gitignored) and, when present, the user `~/.config/caddy/Caddyfile`. Inspect generated files before reloading system Caddy and, when appropriate, reload the service:
+## 📱 Mobile Access
+
+Generate a QR code for LAN access:
 
 ```bash
-# inspect
-less caddy/Caddyfile
-# if using system Caddy (Linux)
-sudo systemctl reload caddy
+devhost qr myapp
 ```
 
-## Troubleshooting
+## 🔧 Framework Integration
 
-### General Issues
+```python
+# All frameworks (auto-detected)
+from devhost_cli.runner import run
+run(app, name="myapp")
 
-- **Check mappings**: `devhost list` - Verify your routes are configured correctly.
-- **Router health**: `curl http://127.0.0.1:5555/health` should return `{ "status": "ok" }`.
-- **Check router logs**: Look for request IDs in logs to trace specific requests (X-Request-ID header).
-- **Validate setup**: `devhost validate` - Quick health checks for config, router, and DNS.
-- **Deep diagnostics**: `devhost doctor` - Comprehensive system diagnostics.
-
-### DNS & Domain Issues
-
-- **Linux DNS issues**: Check `systemd-resolved` and `/etc/resolv.conf` for unintended changes.
-- **macOS DNS issues**: Verify `/etc/resolver/<domain>` file exists and contains `nameserver 127.0.0.1`.
-- **Windows DNS issues**: Wildcard DNS requires a local resolver like Acrylic DNS. Alternatively, use `devhost hosts sync` to add individual entries to hosts file.
-- **Domain resolution**: `devhost resolve <name>` - Show DNS resolution and port reachability.
-
-### Windows-Specific Issues
-
-#### Hosts File Management
-
-**When to use hosts file** (Windows only):
-- You don't have a wildcard DNS resolver installed (like Acrylic DNS)
-- You want individual domain entries instead of wildcard DNS
-- Testing specific routes without full DNS setup
-
-**Admin elevation required**:
-- `devhost hosts sync` - Adds/updates all routes in `C:\Windows\System32\drivers\etc\hosts` (requires admin)
-- `devhost hosts clear` - Removes all devhost entries from hosts file (requires admin)
-
-**Admin NOT required**:
-- `devhost add/remove/list` - Regular route management
-- `devhost start/stop/status` - Router process management
-- `devhost validate` - Health checks
-
-The hosts file commands modify system files and therefore require administrator privileges. The CLI will automatically attempt to relaunch with elevation if needed.
-
-#### Other Windows Issues
-
-- **Port 80 conflicts**: Run `devhost doctor --windows` to check what's using port 80.
-- **Port 80 auto-fix**: `devhost doctor --windows --fix` - Attempts to free port 80 and start Caddy.
-- **Caddy not running**: `devhost caddy status` - Check Caddy status.
-- **Start Caddy**: `devhost caddy start` - Start Caddy web server.
-- **Windows diagnostics**: `devhost doctor --windows` - Windows-specific checks.
-
-### HTTPS & Certificate Issues
-
-- **Browser forcing HTTPS**: Clear HSTS settings for the domain or change base domain (`devhost domain devhost2`).
-- **Caddy not running**: Ensure Caddy is running if you depend on system TLS (`systemctl status caddy` on Linux).
-- **Convert to HTTP**: `devhost fix-http` - Convert all HTTPS mappings to HTTP.
-
-### Remote IP Issues
-
-- **Remote device unreachable**: Verify the remote IP/port is accessible from your machine (`curl http://192.168.1.100:8080`).
-- **Network firewall**: Ensure firewall rules allow traffic to the remote device.
-- **Wrong IP address**: Check the device's current IP (`devhost list` to see configured IPs).
-
-Platform notes
-
-- `install.py` targets Linux/macOS/Windows; it reads `DEVHOST_DOMAIN` or `.devhost/domain` to configure DNS for the base domain.
-- On Windows, run the installer from an elevated PowerShell if you want hosts entries updated automatically, or use a local DNS resolver (Acrylic) for wildcard domains.
-
-Release notes
-
-See `CHANGELOG.md` for the v1.0.0 release notes.
-
-macOS installer
-
-Run the Python installer to generate the LaunchAgent plist (from `router/devhost-router.plist.tmpl`), create `/etc/resolver/<domain>`, and optionally start `dnsmasq` via Homebrew:
-
-```bash
-# dry-run (print actions)
-python install.py --macos --dry-run
-
-# run interactively (will prompt for username and uvicorn path)
-python install.py --macos
+# Works with Flask, FastAPI, Django, and more
+# The runner automatically detects your framework and runs it appropriately
 ```
 
-Non-interactive example (accept all prompts and start dnsmasq if available):
+📖 **Middleware and advanced integration**: See [examples/](https://github.com/Patoruzuy/Devhost/tree/main/examples)
 
-```bash
-python install.py --macos --yes --start-dns
-```
+---
 
-To use a custom base domain on macOS:
+## 🪟 Windows | 🐳 Docker | 🧪 Development
 
-```bash
-devhost domain flask
-python install.py --macos --domain flask
-```
+- **Windows users**: See [Windows setup guide](https://github.com/Patoruzuy/Devhost/blob/main/docs/installation.md#windows) for PowerShell wrapper and port 80 troubleshooting
+- **Docker**: Run `docker compose up --build -d` — router available on port 7777
+- **Contributors**: See [docs/architecture.md](https://github.com/Patoruzuy/Devhost/blob/main/docs/architecture.md) for development setup
 
-Windows installer
+---
 
-Run the Python installer from PowerShell to prepare the venv, router deps, and initial config:
+## 📄 License
 
-```powershell
-python .\install.py --windows --caddy
-python .\devhost add hello 8000
-```
+MIT License - see [LICENSE](https://github.com/Patoruzuy/Devhost/blob/main/LICENSE) for details.
 
-To clean and reinstall:
+## 🙏 Contributing
 
-```powershell
-python .\install.py --windows --clean
-```
-
-If you want a shortcut in PowerShell without typing `python`, use:
-
-```powershell
-.\devhost.ps1 add hello 8000
-.\devhost.ps1 start
-```
-
-Note: the router requires a Host header. Don’t browse `http://127.0.0.1:5555` directly — use `devhost open <name>` or:
-
-```powershell
-curl -H "Host: hello.localhost" http://127.0.0.1:5555/
-
-Tip (Windows): if your app only listens on IPv4, Devhost uses `127.0.0.1` for numeric ports to avoid IPv6 `::1` connection errors.
-```
-
-Tip: On Windows, `devhost.ps1 start` will try to start Caddy (if installed) before starting the router.
+Contributions welcome! Please read the contributing guidelines and submit PRs to the `main` branch.

@@ -2,7 +2,7 @@
 Zero-Config FastAPI Example (v2.3+)
 
 The simplest way to run a FastAPI app with Devhost subdomain support.
-Just one line: run_fastapi(app) - that's it!
+Just one line: runner.run(app) - that's it!
 
 Usage:
     # Install devhost with YAML support
@@ -27,7 +27,7 @@ Features:
 
 from fastapi import FastAPI
 
-from devhost_cli.frameworks import run_fastapi
+from devhost_cli.runner import run
 
 # Create FastAPI app
 app = FastAPI(title="Zero-Config FastAPI Example")
@@ -62,4 +62,4 @@ if __name__ == "__main__":
     # 2. Register itself (e.g., myapi.localhost → 127.0.0.1:8000)
     # 3. Start uvicorn server
     # 4. Cleanup the route on exit
-    run_fastapi(app, name="myapi")
+    run(app, name="myapi")

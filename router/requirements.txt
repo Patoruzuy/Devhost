@@ -1,5 +1,0 @@
-# Router dependencies
-# Pinned with ~= for patch-level flexibility
-fastapi~=0.110
-uvicorn~=0.29
-httpx~=0.27

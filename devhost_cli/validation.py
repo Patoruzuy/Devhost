@@ -1,9 +1,19 @@
 """Target validation and parsing utilities"""
 
+import logging
 import re
 from urllib.parse import urlparse
 
 from .utils import msg_error, msg_info, msg_warning
+
+logger = logging.getLogger("devhost.validation")
+
+# Security: Only allow http/https schemes
+ALLOWED_SCHEMES = {"http", "https"}
+
+# RFC 1035: Length limits for DNS names (imported from router.security)
+# Route names are DNS labels/subdomains and must follow RFC 1035 constraints
+MAX_ROUTE_NAME_LENGTH = 63  # RFC 1035 Section 2.3.4: DNS label max length
 
 
 def validate_name(name: str) -> bool:
@@ -17,9 +27,9 @@ def validate_name(name: str) -> bool:
         msg_error("Name must contain only letters, numbers, and hyphens")
         return False
 
-    # Max length
-    if len(name) > 63:
-        msg_error("Name too long (max 63 characters)")
+    # Max length (RFC 1035: DNS label limit)
+    if len(name) > MAX_ROUTE_NAME_LENGTH:
+        msg_error(f"Name too long: {len(name)} chars (max {MAX_ROUTE_NAME_LENGTH} per RFC 1035)")
         return False
 
     return True
@@ -63,9 +73,16 @@ def parse_target(value: str) -> tuple[str, str, int] | None:
         return ("http", "127.0.0.1", port)
 
     # Full URL
-    if value.startswith("http://") or value.startswith("https://"):
+    if "://" in value:
         try:
             parsed = urlparse(value)
+
+            # Security: Validate scheme
+            if parsed.scheme not in ALLOWED_SCHEMES:
+                logger.warning("Rejected disallowed scheme: %s", parsed.scheme)
+                msg_error(f"Invalid scheme '{parsed.scheme}': only http/https allowed")
+                return None
+
             if not parsed.hostname or not parsed.port:
                 msg_error("Invalid URL: must include host and port")
                 return None

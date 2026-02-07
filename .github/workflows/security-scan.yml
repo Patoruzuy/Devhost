@@ -1,0 +1,150 @@
+name: Security Scan
+
+on:
+  # Run weekly on Mondays at 9 AM UTC
+  schedule:
+    - cron: '0 9 * * 1'
+  # Allow manual trigger
+  workflow_dispatch:
+  # Run on pushes to main that affect dependencies
+  push:
+    branches: [ main ]
+    paths:
+      - 'pyproject.toml'
+      - 'router/requirements.txt'
+      - '.github/workflows/security-scan.yml'
+
+jobs:
+  dependency-scan:
+    name: Dependency vulnerability scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f router/requirements.txt ]; then pip install -r router/requirements.txt; fi
+          pip install pip-audit
+          pip install -e .[all]
+
+      - name: Run pip-audit vulnerability scan
+        id: pip-audit
+        run: |
+          echo "Running pip-audit..."
+          pip-audit --desc --format json --output pip-audit-report.json || true
+          pip-audit --desc || true
+          
+          # Extract summary
+          if [ -f pip-audit-report.json ]; then
+            VULN_COUNT=$(python -c "import json; data=json.load(open('pip-audit-report.json')); print(len(data.get('dependencies', [])))" || echo "0")
+            echo "vulnerabilities=$VULN_COUNT" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+          retention-days: 90
+
+      - name: Create issue if vulnerabilities found
+        if: steps.pip-audit.outputs.vulnerabilities != '0'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const vulnCount = '${{ steps.pip-audit.outputs.vulnerabilities }}';
+            const date = new Date().toISOString().split('T')[0];
+            
+            // Check if issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'security,dependencies',
+            });
+            
+            const existingIssue = issues.data.find(issue => 
+              issue.title.includes('Dependency Vulnerabilities')
+            );
+            
+            if (!existingIssue) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🔒 Dependency Vulnerabilities Detected (${date})`,
+                body: `## Automated Security Scan Report
+                
+                **Date**: ${date}
+                **Vulnerabilities Found**: ${vulnCount}
+                
+                The weekly dependency scan found known security vulnerabilities.
+                
+                ### Next Steps
+                1. Download the [pip-audit-report.json artifact](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                2. Review each vulnerability's severity and impact
+                3. Update affected dependencies to patched versions
+                4. Run \`pip-audit --desc\` locally for details
+                
+                ### Common Fixes
+                \`\`\`bash
+                # Update specific package
+                pip install --upgrade <package-name>
+                
+                # Update all dependencies
+                pip install --upgrade -r router/requirements.txt
+                
+                # Verify fixes
+                pip-audit --desc
+                \`\`\`
+                
+                See [docs/security-configuration.md](docs/security-configuration.md) for vulnerability response process.
+                `,
+                labels: ['security', 'dependencies', 'automated'],
+              });
+            }
+
+  sbom-generation:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install cyclonedx-bom
+          if [ -f router/requirements.txt ]; then pip install -r router/requirements.txt; fi
+          pip install -e .[all]
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          cyclonedx-py environment --format json --output sbom-cyclonedx.json
+          cyclonedx-py environment --format xml --output sbom-cyclonedx.xml
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: sbom-artifacts
+          path: |
+            sbom-cyclonedx.json
+            sbom-cyclonedx.xml
+          retention-days: 90
+
+      - name: Display SBOM summary
+        run: |
+          echo "=== SBOM Generated ==="
+          python -c "import json; data=json.load(open('sbom-cyclonedx.json')); print(f\"Components: {len(data.get('components', []))}\")"

@@ -27,7 +27,6 @@ class TestRouterIntegration(unittest.TestCase):
     def setUpClass(cls):
         """Start router subprocess once for all tests"""
         cls.script_dir = Path(__file__).parent.parent.resolve()
-        cls.router_dir = cls.script_dir / "router"
 
         # Create temp config for isolated testing
         cls.temp_dir = tempfile.mkdtemp()
@@ -48,10 +47,20 @@ class TestRouterIntegration(unittest.TestCase):
         env["DEVHOST_DOMAIN"] = "localhost"
         env["PYTHONUNBUFFERED"] = "1"
 
-        # Start router subprocess
+        # Start router subprocess using packaged router
         cls.router_process = subprocess.Popen(
-            [python_exe, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", "5556"],
-            cwd=str(cls.router_dir),
+            [
+                python_exe,
+                "-m",
+                "uvicorn",
+                "devhost_cli.router.core:create_app",
+                "--factory",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "5556",
+            ],
+            cwd=str(cls.script_dir),
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

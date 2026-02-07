@@ -3,15 +3,20 @@ WSGI middleware for Devhost subdomain routing.
 
 This middleware adds subdomain routing capability to WSGI applications
 like Flask and Django. It wraps the WSGI application and provides
-subdomain-aware request handling.
+subdomain-aware request handling with connection pooling, SSRF protection,
+retry logic, and metrics tracking.
 """
 
 import json
+import logging
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import requests
+import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class DevhostWSGIMiddleware:
@@ -21,6 +26,13 @@ class DevhostWSGIMiddleware:
     This middleware intercepts requests and routes them based on subdomain
     configuration, similar to the ASGI middleware but for synchronous
     WSGI applications.
+
+    Features:
+    - Connection pooling with httpx for better performance
+    - SSRF protection to block malicious targets
+    - Retry logic with exponential backoff for transient failures
+    - Metrics tracking for monitoring
+    - Rate-limited config reloading
 
     Usage:
         from flask import Flask
@@ -35,6 +47,8 @@ class DevhostWSGIMiddleware:
         app: Callable,
         config_path: str | None = None,
         base_domain: str | None = None,
+        max_retries: int = 3,
+        timeout: float = 30.0,
     ):
         """
         Initialize WSGI middleware.
@@ -43,15 +57,53 @@ class DevhostWSGIMiddleware:
             app: The WSGI application to wrap
             config_path: Optional path to devhost.json config file
             base_domain: Optional base domain (default: localhost)
+            max_retries: Maximum number of retry attempts for transient failures
+            timeout: Request timeout in seconds
         """
         self.app = app
         self.config_path = config_path or self._find_config()
         self.base_domain = base_domain or "localhost"
+        self.max_retries = max_retries
+        self.timeout = timeout
         self._routes: dict[str, Any] = {}
+        self._last_reload = 0.0
+        self._reload_interval = 2.0  # Reload config at most every 2 seconds
+
+        # Initialize httpx client with connection pooling
+        self._client = httpx.Client(
+            limits=httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=100,
+                keepalive_expiry=30.0,
+            ),
+            timeout=timeout,
+            follow_redirects=False,
+        )
+
+        # Initialize metrics
+        self._metrics = {
+            "requests_total": 0,
+            "requests_proxied": 0,
+            "requests_failed": 0,
+            "ssrf_blocks": 0,
+        }
+
         self._load_routes()
+
+    def __del__(self):
+        """Clean up resources."""
+        try:
+            self._client.close()
+        except Exception:
+            pass
 
     def _find_config(self) -> str:
         """Find devhost.json config file."""
+        # Check ~/.devhost/devhost.json first (correct priority)
+        home_config = Path.home() / ".devhost" / "devhost.json"
+        if home_config.exists():
+            return str(home_config)
+
         # Check current directory
         config_file = Path("devhost.json")
         if config_file.exists():
@@ -64,17 +116,25 @@ class DevhostWSGIMiddleware:
             if config_file.exists():
                 return str(config_file)
 
-        # Default path
-        return "devhost.json"
+        # Default to home config path
+        return str(home_config)
 
     def _load_routes(self) -> None:
-        """Load routes from devhost.json config file."""
+        """Load routes from devhost.json config file with rate limiting."""
+        current_time = time.time()
+        if current_time - self._last_reload < self._reload_interval:
+            return
+
+        self._last_reload = current_time
+
         try:
             config_path = Path(self.config_path)
             if config_path.exists():
                 with open(config_path) as f:
                     self._routes = json.load(f)
-        except (OSError, json.JSONDecodeError):
+                logger.debug(f"Loaded {len(self._routes)} routes from {config_path}")
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(f"Failed to load routes: {e}")
             self._routes = {}
 
     def _extract_subdomain(self, host: str) -> str | None:
@@ -135,6 +195,31 @@ class DevhostWSGIMiddleware:
 
         return None
 
+    def _validate_upstream_target(self, target: dict[str, Any]) -> bool:
+        """
+        Validate upstream target for SSRF protection.
+
+        Args:
+            target: Target service info (scheme, host, port)
+
+        Returns:
+            True if target is safe, False otherwise
+        """
+        try:
+            from devhost_cli.router.security import validate_upstream_target
+
+            host = target["host"]
+            port = target["port"]
+            valid, error_msg = validate_upstream_target(host, port)
+            if not valid:
+                logger.warning(f"SSRF validation failed for {target}: {error_msg}")
+                self._metrics["ssrf_blocks"] += 1
+            return valid
+        except Exception as e:
+            logger.warning(f"SSRF validation failed for {target}: {e}")
+            self._metrics["ssrf_blocks"] += 1
+            return False
+
     def __call__(self, environ: dict[str, Any], start_response: Callable) -> Any:
         """
         WSGI application callable.
@@ -146,7 +231,9 @@ class DevhostWSGIMiddleware:
         Returns:
             Response iterable
         """
-        # Reload routes on each request (for hot reload)
+        self._metrics["requests_total"] += 1
+
+        # Reload routes with rate limiting
         self._load_routes()
 
         # Extract subdomain from Host header
@@ -161,20 +248,40 @@ class DevhostWSGIMiddleware:
         if subdomain and subdomain in self._routes:
             target = self._parse_target(self._routes[subdomain])
             if target:
+                # SSRF protection check
+                if not self._validate_upstream_target(target):
+                    status = "403 Forbidden"
+                    response_headers = [("Content-Type", "application/json")]
+                    start_response(status, response_headers)
+                    error_body = json.dumps(
+                        {
+                            "error": "Forbidden",
+                            "message": f"Target {target['host']}:{target['port']} is not allowed (SSRF protection)",
+                        }
+                    ).encode()
+                    return [error_body]
+
                 environ["devhost.target"] = target
-                return self._proxy_request(environ, start_response, target)
+                return self._proxy_request(environ, start_response, target, subdomain)
 
         # No subdomain routing, pass through to wrapped app
         return self.app(environ, start_response)
 
-    def _proxy_request(self, environ: dict[str, Any], start_response: Callable, target: dict[str, Any]) -> Any:
+    def _proxy_request(
+        self,
+        environ: dict[str, Any],
+        start_response: Callable,
+        target: dict[str, Any],
+        subdomain: str,
+    ) -> Any:
         """
-        Proxy request to target service.
+        Proxy request to target service with retry logic.
 
         Args:
             environ: WSGI environment dict
             start_response: WSGI start_response callable
             target: Target service info (scheme, host, port)
+            subdomain: Subdomain name for logging
 
         Returns:
             Response iterable
@@ -190,12 +297,23 @@ class DevhostWSGIMiddleware:
         if query:
             url += f"?{query}"
 
-        # Prepare headers
+        # Prepare headers (filter hop-by-hop headers)
         headers = {}
+        hop_by_hop = {
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailers",
+            "transfer-encoding",
+            "upgrade",
+        }
         for key, value in environ.items():
             if key.startswith("HTTP_"):
-                header_name = key[5:].replace("_", "-").title()
-                headers[header_name] = value
+                header_name = key[5:].replace("_", "-").lower()
+                if header_name not in hop_by_hop:
+                    headers[header_name] = value
 
         # Get request method and body
         method = environ.get("REQUEST_METHOD", "GET")
@@ -207,32 +325,66 @@ class DevhostWSGIMiddleware:
             except (ValueError, KeyError):
                 pass
 
-        # Make proxy request
-        try:
-            response = requests.request(
-                method=method,
-                url=url,
-                headers=headers,
-                data=body,
-                allow_redirects=False,
-                timeout=30,
-            )
+        # Retry loop for transient failures
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                logger.debug(f"Proxying {method} {url} (attempt {attempt + 1}/{self.max_retries})")
 
-            # Prepare response headers
-            response_headers = [(name, value) for name, value in response.headers.items()]
+                response = self._client.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    content=body,
+                )
 
-            # Start response
-            status = f"{response.status_code} {response.reason}"
-            start_response(status, response_headers)
+                # Success - prepare response
+                self._metrics["requests_proxied"] += 1
 
-            # Return response body
-            return [response.content]
+                # Filter hop-by-hop headers from response
+                response_headers = [
+                    (name, value) for name, value in response.headers.items() if name.lower() not in hop_by_hop
+                ]
 
-        except requests.RequestException as e:
-            # Error response
-            status = "502 Bad Gateway"
-            response_headers = [("Content-Type", "application/json")]
-            start_response(status, response_headers)
+                # Start response
+                status = f"{response.status_code} {response.reason_phrase}"
+                start_response(status, response_headers)
 
-            error_body = json.dumps({"error": "Proxy error", "message": str(e)}).encode()
-            return [error_body]
+                # Return response body
+                return [response.content]
+
+            except httpx.ConnectError as e:
+                # Transient connection error - retry with exponential backoff
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    backoff = 0.1 * (2**attempt)  # 100ms, 200ms, 400ms
+                    logger.debug(f"Connection error, retrying in {backoff}s: {e}")
+                    time.sleep(backoff)
+                    continue
+
+            except Exception as e:
+                # Non-retryable error
+                last_error = e
+                break
+
+        # All retries exhausted or non-retryable error
+        self._metrics["requests_failed"] += 1
+        logger.warning(f"Proxy request failed after {self.max_retries} attempts: {last_error}")
+
+        status = "502 Bad Gateway"
+        response_headers = [("Content-Type", "application/json")]
+        start_response(status, response_headers)
+
+        error_body = json.dumps(
+            {
+                "error": "Proxy error",
+                "message": str(last_error),
+                "subdomain": subdomain,
+                "target": f"{host}:{port}",
+            }
+        ).encode()
+        return [error_body]
+
+    def get_metrics(self) -> dict[str, int]:
+        """Get current metrics."""
+        return self._metrics.copy()

@@ -1,84 +1,104 @@
-VENV=router/venv
+# Devhost Development Makefile
+# Modern Python development workflow with automated venv setup
+
+VENV = .venv
 ifeq ($(OS),Windows_NT)
-PY=$(VENV)/Scripts/python
+	PYTHON = $(VENV)/Scripts/python.exe
+	PIP = $(VENV)/Scripts/pip.exe
+	ACTIVATE = $(VENV)/Scripts/activate
 else
-PY=$(VENV)/bin/python
+	PYTHON = $(VENV)/bin/python
+	PIP = $(VENV)/bin/pip
+	ACTIVATE = $(VENV)/bin/activate
 endif
 
-.PHONY: venv install start test docker-up docker-build lint help devhost-url devhost-open devhost-list devhost-list-json devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info devhost-status-json completions-zsh completions-bash windows-setup
+.PHONY: help install install-dev install-all test test-security lint format clean start dashboard \
+        completions-zsh completions-bash venv
 
-venv:
+help:
+	@echo "Devhost Development Commands:"
+	@echo ""
+	@echo "Setup & Installation:"
+	@echo "  make install          - Create venv and install base package"
+	@echo "  make install-dev      - Install with dev dependencies (pytest, ruff)"
+	@echo "  make install-all      - Install with all extras (dev, tui, qr)"
+	@echo ""
+	@echo "Development:"
+	@echo "  make test             - Run all tests"
+	@echo "  make test-security    - Run security tests only"
+	@echo "  make lint             - Check code with ruff"
+	@echo "  make format           - Auto-format code with ruff"
+	@echo "  make clean            - Remove venv and build artifacts"
+	@echo ""
+	@echo "Runtime:"
+	@echo "  make start            - Start devhost router"
+	@echo "  make dashboard        - Launch TUI dashboard"
+	@echo ""
+	@echo "Shell Completions:"
+	@echo "  make completions-zsh  - Install zsh completions"
+	@echo "  make completions-bash - Install bash completions"
+
+# Create virtual environment if it doesn't exist
+$(VENV):
 	python -m venv $(VENV)
+	$(PIP) install --upgrade pip setuptools wheel
 
-install: venv
-	$(PY) -m pip install --upgrade pip
-	$(PY) -m pip install -r router/requirements.txt
+# Base installation
+install: $(VENV)
+	$(PIP) install -e .
 
+# Install with dev dependencies
+install-dev: $(VENV)
+	$(PIP) install -e ".[dev]"
+
+# Install with all extras
+install-all: $(VENV)
+	$(PIP) install -e ".[dev,all]"
+
+# Run all tests
+test: install-dev
+	$(PYTHON) -m unittest discover -v
+
+# Run security tests only
+test-security: install-dev
+	$(PYTHON) -m unittest discover -s tests -p "test_security_*.py" -v
+
+# Lint with ruff
+lint: install-dev
+	$(PYTHON) -m ruff check .
+	$(PYTHON) -m ruff format --check .
+
+# Auto-format with ruff
+format: install-dev
+	$(PYTHON) -m ruff format .
+
+# Start router (requires installation)
 start: install
-	cd router && $(PY) -m uvicorn app:app --host 127.0.0.1 --port 5555 --reload
+	$(PYTHON) -m devhost_cli.main start
 
-test: install
-	$(PY) -m py_compile router/*.py
-	$(PY) -m unittest discover -s tests -p "test_*.py"
+# Launch TUI dashboard
+dashboard: install-all
+	$(PYTHON) -m devhost_cli.main dashboard
 
-docker-build:
-	docker compose build
+# Clean build artifacts and venv
+clean:
+	rm -rf $(VENV)
+	rm -rf *.egg-info
+	rm -rf dist build
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
-docker-up:
-	docker compose up --build -d
-
-lint: install
-	$(PY) -m ruff check .
-	$(PY) -m ruff format --check .
-
-format: install
-	$(PY) -m ruff format .
-
-devhost-url:
-	./devhost url
-
-devhost-open:
-	./devhost open
-
-devhost-list:
-	./devhost list
-
-devhost-list-json:
-	./devhost list --json
-
-devhost-validate:
-	./devhost validate
-
-devhost-export-caddy:
-	./devhost export caddy
-
-devhost-edit:
-	./devhost edit
-
-devhost-resolve:
-	./devhost resolve
-
-devhost-doctor:
-	./devhost doctor
-
-devhost-info:
-	./devhost info
-
-devhost-status-json:
-	./devhost status --json
-
+# Install zsh completions
 completions-zsh:
 	mkdir -p $(HOME)/.zsh/completions
 	cp completions/_devhost $(HOME)/.zsh/completions/_devhost
-	@echo "Add to .zshrc if needed: fpath=($(HOME)/.zsh/completions $$fpath) && autoload -U compinit && compinit"
+	@echo "Zsh completions installed. Add to .zshrc:"
+	@echo "  fpath=($(HOME)/.zsh/completions \$$fpath)"
+	@echo "  autoload -U compinit && compinit"
 
+# Install bash completions
 completions-bash:
 	mkdir -p $(HOME)/.bash_completion.d
 	cp completions/devhost.bash $(HOME)/.bash_completion.d/devhost
-	@echo "Add to .bashrc if needed: source $(HOME)/.bash_completion.d/devhost"
-
-windows-setup:
-	powershell -ExecutionPolicy Bypass -File scripts\\setup-windows.ps1
-
-help:
-	@echo "Available targets: venv install start test docker-build docker-up lint devhost-url devhost-open devhost-list devhost-list-json devhost-validate devhost-export-caddy devhost-edit devhost-resolve devhost-doctor devhost-info devhost-status-json completions-zsh completions-bash windows-setup"
+	@echo "Bash completions installed. Add to .bashrc:"
+	@echo "  source $(HOME)/.bash_completion.d/devhost"

@@ -15,7 +15,7 @@ Usage:
     # Access:
     # http://frontend.localhost - proxies to localhost:3000
     # http://backend.localhost - proxies to localhost:8000
-    # http://localhost:5555/api/status - custom endpoint (no proxy)
+    # http://localhost:7777/api/status - custom endpoint (no proxy)
 """
 
 import uvicorn
@@ -99,4 +99,4 @@ if __name__ == "__main__":
     print("  3. Visit http://frontend.localhost")
     print("=" * 60)
 
-    uvicorn.run(app, host="127.0.0.1", port=5555)
+    uvicorn.run(app, host="127.0.0.1", port=7777)
