@@ -297,27 +297,22 @@ class ProxyBridge:
         driver: str,
         *,
         config_path: str | None = None,
-        no_attach: bool = False,
-        no_verify: bool = False,
+        auto_attach: bool = True,
+        verify: bool = True,
         port: int = 80,
     ) -> tuple[bool, str]:
-        from devhost_cli.proxy import transfer_to_external
+        from devhost_cli.proxy import transfer_to_external as _do_transfer
 
-        def _transfer():
-            try:
-                transfer_to_external(
-                    state,
-                    driver,
-                    config_path=config_path,
-                    no_attach=no_attach,
-                    no_verify=no_verify,
-                    port=port,
-                )
-                return True, "Transfer complete"
-            except Exception as exc:
-                return False, str(exc)
-
-        return await _run_sync(_transfer)
+        path = Path(config_path) if config_path else None
+        return await _run_sync(
+            _do_transfer,
+            state,
+            driver,
+            config_path=path,
+            auto_attach=auto_attach,
+            verify=verify,
+            port=port,
+        )
 
     @staticmethod
     async def generate_snippet(driver: str, routes: list) -> str:

@@ -336,6 +336,8 @@ class ProxyScreen(Container):
             app.state,
             driver,
             config_path=config_path_val,
+            auto_attach=True,
+            verify=True,
         )
         app.notify(msg, severity="information" if ok else "error")
         self._set_result(msg)
